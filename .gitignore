@@ -1,19 +1,74 @@
-CMakeLists.txt.user
+# ==========================
+# CMake 构建产物（忽略）
+# ==========================
+# 构建目录（debug/release 均忽略）
+cmake-build-*/
+# CMake 缓存和临时文件
 CMakeCache.txt
-CMakeFiles
-CMakeScripts
-Testing
+CMakeFiles/
+CMakeScripts/
+Testing/
+CTestTestfile.cmake
+# 构建生成的 Makefile 和安装相关文件
 Makefile
 cmake_install.cmake
 install_manifest.txt
-compile_commands.json
-CTestTestfile.cmake
-_deps
+# 依赖下载目录（FetchContent 生成）
+_deps/
+# 本地用户配置（不共享）
+CMakeLists.txt.user
 CMakeUserPresets.json
 
-# CLion
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#cmake-build-*
+# ==========================
+# CLion IDE 配置（忽略）
+# ==========================
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+.localhistory/
+
+# ==========================
+# 通用 C++ 构建产物（忽略）
+# ==========================
+# 可执行文件
+*.out
+*.exe
+# 目标文件和库文件
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
+# 编译中间文件
+*.gch
+*.pch
+*.dep
+*.d
+# 调试相关
+*.su
+*.gdb
+*.dSYM/
+# 临时文件
+.DS_Store
+*.swp
+*~
+
+# ==========================
+# 框架专属（忽略，可选补充）
+# ==========================
+logs/
+config/local.json
+config/local.ini
+*.db
+*.sqlite3
+
+# ==========================
+# 以下 CMake 核心配置文件会自动保留（无需添加到 .gitignore）
+# ==========================
+# CMakeLists.txt（项目核心配置，必须提交）
+# *.cmake（自定义模块/配置文件，如 FindXXX.cmake，自动保留）
+# cmake/ 目录（若有，存放 CMake 模块，自动保留）

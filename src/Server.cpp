@@ -1,0 +1,596 @@
+#include "../include/Server.h"
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <cstring>
+#include <utility>
+#include <signal.h>
+#include <iomanip>
+#include <ctime>
+
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <windows.h>
+    #ifdef _MSC_VER
+        #pragma comment(lib, "ws2_32.lib")
+    #endif
+    #define close(s) closesocket(s)
+    typedef int socklen_t;
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+#endif
+
+/**
+ * 将map转换为JSON格式的字符串
+ * @param mp 输入的map，键值类型均为string
+ * @return 返回JSON格式的字符串
+ */
+std::string mpToJson(const std::map<std::string, std::string>& mp) {
+    std::string json = "{";  // 初始化JSON字符串，开始标记
+    // 遍历map中的每个键值对
+    for (const auto& pair : mp) {
+        // 将键值对添加到JSON字符串中，格式为"key":"value",
+        json += "\"" + pair.first + "\":\"" + pair.second + "\",";
+    }
+    // 如果JSON字符串不为空（即map不为空），移除最后一个多余的逗号
+    if (!json.empty()) {
+        json.pop_back(); // 移除最后一个逗号
+    }
+    json += "}";  // 添加JSON字符串的结束标记
+    return json;  // 返回生成的JSON字符串
+}
+
+// 静态成员初始化
+Server* Server::instance_ = nullptr;
+
+Server::Server(int port) : port_(port), serverSocket_(-1), running_(false), threadpool_(std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 1) {
+    instance_ = this;
+    registerSignalHandlers(); // 注册信号处理函数
+}
+
+void Server::signalHandler(int /*sig*/) {
+    std::cout << "\nShutting down server..." << std::endl;
+    if (instance_) {
+        instance_->stop();
+    }
+    exit(0);
+}
+
+#ifdef _WIN32
+// Windows控制台关闭事件处理函数
+BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
+    if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_CLOSE_EVENT || 
+        dwCtrlType == CTRL_BREAK_EVENT) {
+        if (Server::instance_) {
+            std::cout << "\nShutting down server..." << std::endl;
+            Server::instance_->stop();
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
+/**
+ * 注册信号处理函数，用于处理程序终止信号
+ * 根据不同操作系统平台设置相应的信号处理机制
+ */
+void Server::registerSignalHandlers() {
+#ifdef _WIN32
+    // Windows上使用SetConsoleCtrlHandler处理控制台关闭事件
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+    signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
+#else
+    // Linux/Unix上信号处理正常工作
+    signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
+#endif
+}
+
+Server::~Server() {
+    std::cout << "\nShutting down server..." << std::endl;
+    stop();
+}
+
+void Server::get(const std::string& path, Handler handler) {
+    std::lock_guard<std::mutex> lock(routesMutex_);
+    routes_["GET"][path] = std::move(handler);
+}
+
+void Server::post(const std::string& path, Handler handler) {
+    std::lock_guard<std::mutex> lock(routesMutex_);
+    routes_["POST"][path] = std::move(handler);
+}
+
+void Server::put(const std::string& path, Handler handler) {
+    std::lock_guard<std::mutex> lock(routesMutex_);
+    routes_["PUT"][path] = std::move(handler);
+}
+
+void Server::del(const std::string& path, Handler handler) {
+    std::lock_guard<std::mutex> lock(routesMutex_);
+    routes_["DELETE"][path] = std::move(handler);
+}
+
+/**
+ * 服务器运行函数
+ * 初始化网络环境，创建socket，绑定地址，监听连接并处理客户端请求
+ */
+void Server::run() {
+#ifdef _WIN32
+    // Windows平台特定的网络初始化
+    // 初始化Winsock库，版本为2.2
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "Error: Failed to initialize Winsock" << std::endl;
+        return;
+    }
+#endif
+
+    // 创建socket
+    // 使用IPv4(TCP)协议创建流式socket
+    serverSocket_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket_ < 0) {
+        std::cerr << "Error: Failed to create socket" << std::endl;
+#ifdef _WIN32
+        WSACleanup();  // Windows平台清理网络环境
+#endif
+        return;
+    }
+    
+    // 设置socket选项，允许地址重用
+    // 设置SO_REUSEADDR选项，避免端口占用问题
+    int opt = 1;
+    setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+    
+    // 绑定地址
+    // 准备服务器地址结构
+    struct sockaddr_in address{};
+    memset(&address, 0, sizeof(address));  // 清零地址结构
+    address.sin_family = AF_INET;          // 使用IPv4
+    address.sin_addr.s_addr = INADDR_ANY;  // 监听所有可用接口
+    address.sin_port = htons(port_);       // 设置端口
+    
+    // 绑定socket到指定端口
+    if (bind(serverSocket_, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        std::cerr << "Error: Failed to bind to port " << port_ << std::endl;
+        close(serverSocket_);
+#ifdef _WIN32
+        WSACleanup();  // Windows平台清理网络环境
+#endif
+        return;
+    }
+    
+    // 监听
+    // 开始监听socket，设置最大连接数为10
+    if (listen(serverSocket_, 10) < 0) {
+        std::cerr << "Error: Failed to listen on socket" << std::endl;
+        close(serverSocket_);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return;
+    }
+    
+    running_ = true;
+    
+    // 打印注册的路由信息
+    printRegisteredRoutes();
+    std::cout << "Server running on http://localhost:" << port_ << std::endl;
+    std::cout << "========================================" << std::endl;
+    
+    // 接受连接
+    // 主循环，持续接受客户端连接
+    while (running_) {
+        // 准备客户端地址结构
+        struct sockaddr_in clientAddress{};
+        socklen_t clientAddrLen = sizeof(clientAddress);
+        
+        // 接受新的客户端连接
+        int clientSocket = accept(serverSocket_, (struct sockaddr*)&clientAddress, &clientAddrLen);
+        if (clientSocket < 0) {
+            if (running_) {
+                std::cerr << "Error: Failed to accept connection" << std::endl;
+            }
+            continue;
+        }
+
+        // 将客户端连接处理任务添加到线程池
+        // Server.cpp 第221行附近，修改线程池添加任务的代码
+        // Server.cpp 第221行，替换原 lambda 调用
+        bool state = threadpool_.addTask(
+                &Server::handleClient,  // 要执行的函数
+                this,                  // 成员函数的第一个参数：this指针
+                clientSocket,          // handleClient 的第一个参数
+                &clientAddress         // handleClient 的第二个参数（指针，原变量生命周期有效）
+        );
+
+        if (!state) {
+            std::cout<<"Failed to add task to thread pool" << std::endl;
+        }
+    }
+}
+
+/**
+ * 停止服务器函数
+ * 该函数用于安全地关闭服务器，释放相关资源
+ */
+void Server::stop() {
+    // 检查服务器是否已经停止，如果已停止则直接返回
+    if (!running_) {
+        return;  // 已经停止，避免重复输出
+    }
+    
+    // 设置服务器运行状态为停止
+    running_ = false;
+    // 输出服务器停止信息
+    std::cout << "Server stopped." << std::endl;
+    
+    // 检查服务器套接字是否有效
+    if (serverSocket_ >= 0) {
+        // 关闭服务器套接字
+        close(serverSocket_);
+        // 将套接字描述符重置为无效值
+        serverSocket_ = -1;
+    }
+#ifdef _WIN32
+    // 如果是Windows平台，进行Windows套接字清理
+    WSACleanup();
+#endif
+}
+
+/**
+ * 处理客户端请求的函数
+ * @param clientSocket 客户端套接字描述符
+ * @param clientAddress 客户端地址结构指针
+ */
+void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
+    // 创建缓冲区并初始化为0，用于接收客户端数据
+    char buffer[8192] = {0};
+    // 从客户端读取数据，读取的字节数存储在bytesRead中
+    int bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+    
+    // 如果读取字节数小于等于0，表示连接已关闭或出错
+    if (bytesRead <= 0) {
+        // 关闭客户端套接字并返回
+        close(clientSocket);
+        return;
+    }
+    
+    // 将接收到的数据转换为字符串
+    std::string requestStr(buffer, bytesRead);
+    // 解析HTTP请求
+    Request request = parseRequest(requestStr);
+    
+    // 创建响应对象
+    Response response;
+    
+    // 处理 OPTIONS 预检请求（CORS）
+    if (request.method == "OPTIONS") {
+        response.statusCode = 200;
+        response.body = "";
+        // CORS 头将在 buildResponse 中添加
+    } else {
+        // 查找路由处理器
+        Handler handler = findHandler(request.method, request.path);
+        if (handler) {
+            // 如果找到处理器，执行处理函数
+            try {
+                handler(request, response);
+            } catch (const std::exception& e) {
+                // 捕获异常并返回500错误
+                response.statusCode = 500;
+                response.json(R"({"error":"Internal server error: )" + std::string(e.what()) + "\"}");
+            }
+        } else {
+            // 如果未找到处理器，返回404错误
+            response.statusCode = 404;
+            response.json(R"({"error":"Not found"})");
+        }
+    }
+
+
+    
+    // 构建响应字符串并发送给客户端
+    std::string responseStr = buildResponse(response);
+    send(clientSocket, responseStr.c_str(), responseStr.length(), 0);
+
+    // 打印访问日志（类似Apache/Nginx格式）
+    std::string clientIP = getClientIP(clientAddress);
+    std::lock_guard<std::mutex> lock(logMutex_);
+    std::cout << clientIP << " - - [" << getFormattedDate() << "] \"" 
+              << request.method << " " << request.path;
+    if (!request.queryParams.empty()) {
+        std::cout << "?";
+        bool first = true;
+        for (const auto& param : request.queryParams) {
+            if (!first) std::cout << "&";
+            std::cout << param.first << "=" << param.second;
+            first = false;
+        }
+    }
+    std::cout << " HTTP/1.1\" " << response.statusCode << " " 
+              << response.body.length() << std::endl;
+
+    close(clientSocket);
+}
+
+/**
+ * 解析HTTP请求字符串，将其解析为Request结构体
+ * @param requestStr HTTP请求字符串
+ * @return 解析后的Request对象
+ */
+Request Server::parseRequest(const std::string& requestStr) {
+    // 创建Request对象和字符串流
+    Request request;
+    std::istringstream iss(requestStr);
+    std::string line;
+    
+    // 解析请求行（第一行）
+    if (std::getline(iss, line)) {
+        std::istringstream lineStream(line);
+        // 提取方法和路径
+        lineStream >> request.method >> request.path;
+        
+        // 分离路径和查询参数
+        size_t queryPos = request.path.find('?');
+        if (queryPos != std::string::npos) {
+            std::string query = request.path.substr(queryPos + 1);
+            request.queryParams = parseQueryParams(query);
+            // 解析查询参数
+            request.path = request.path.substr(0, queryPos);
+        }
+            // 更新路径为不包含查询参数的部分
+    }
+    
+    // 解析头部和body
+    bool inBody = false;
+    std::string body;
+    while (std::getline(iss, line)) {  // 标记是否进入body部分
+        if (line.empty() || line == "\r") {
+            inBody = true;
+        // 空行或\r表示头部结束，body开始
+            continue;
+        }
+        
+        if (!inBody) {
+            size_t colonPos = line.find(':');
+            if (colonPos != std::string::npos) {
+            // 解析头部字段
+                std::string key = line.substr(0, colonPos);
+                std::string value = line.substr(colonPos + 1);
+                // 提取键值对
+
+                // 去除空格和\r
+                key.erase(0, key.find_first_not_of(" \t\r"));
+                key.erase(key.find_last_not_of(" \t\r") + 1);
+                value.erase(0, value.find_first_not_of(" \t\r"));
+                value.erase(value.find_last_not_of(" \t\r") + 1);
+                
+                request.headers[key] = value;
+//                std::cout<<"key: "<<key<<" value: "<<value<<std::endl;
+            }
+        } else {
+            body += line;
+            if (!iss.eof()) body += "\n";
+        }
+    }
+    
+    request.body = body;
+    request.parseBody();
+    return request;
+}
+
+/**
+ * 构建HTTP响应字符串
+ * @param response 包含状态码、头部和响应体的Response对象
+ * @return 构建好的HTTP响应字符串
+ */
+std::string Server::buildResponse(const Response& response) {
+//    std::cout<<"Build Response"<<std::endl;
+//    std::cout<<response.statusCode<<std::endl;
+    std::ostringstream oss;  // 使用字符串流构建响应
+    
+    // 添加状态行，包括HTTP版本、状态码和状态描述
+    oss << "HTTP/1.1 " << response.statusCode << " ";
+    switch (response.statusCode) {
+        case 200: oss << "OK"; break;      // 200 OK - 请求成功
+        case 201: oss << "Created"; break;  // 201 Created - 资源创建成功
+        case 400: oss << "Bad Request"; break;  // 400 Bad Request - 客户端请求错误
+        case 404: oss << "Not Found"; break;    // 404 Not Found - 资源未找到
+        case 500: oss << "Internal Server Error"; break;  // 500 Internal Server Error - 服务器内部错误
+        default: oss << "Unknown"; break;   // 未知状态码
+    }
+    oss << "\r\n";  // HTTP协议使用\r\n作为换行符
+    
+    // 添加 CORS 头（跨域支持）
+    oss << "Access-Control-Allow-Origin: *\r\n";
+    oss << "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    oss << "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With\r\n";
+    oss << "Access-Control-Max-Age: 86400\r\n";  // 预检请求缓存24小时
+    
+    // 添加其他头部
+    for (const auto& header : response.headers) {
+        oss << header.first << ": " << header.second << "\r\n";
+    }
+    
+    oss << "Content-Length: " << response.body.length() << "\r\n";
+    oss << "\r\n";
+    oss << response.body;
+
+//    std::cout<<oss.str()<<std::endl;
+    
+    return oss.str();
+}
+
+/**
+ * 查找并返回与给定方法和路径匹配的处理程序
+ * @param method HTTP方法（如"GET"、"POST"等）
+ * @param path 请求的URL路径
+ * @return 匹配的Handler对象，如果未找到则返回nullptr
+ */
+Handler Server::findHandler(const std::string& method, const std::string& path) {
+    // 检查是否存在对应方法的路由映射
+    if (routes_.find(method) != routes_.end()) {
+        const auto& methodRoutes = routes_[method];  // 获取该方法的所有路由
+        
+        // 精确匹配检查
+        if (methodRoutes.find(path) != methodRoutes.end()) {
+            return methodRoutes.at(path);  // 返回精确匹配的处理程序
+        }
+    }
+    
+    return nullptr;  // 未找到匹配的处理程序，返回空指针
+}
+
+#include <string>
+
+/**
+ * URL解码函数
+ * 用于解码URL中的特殊字符，如将%编码的字符转换为原始字符，将+转换为空格
+ * @param value 需要解码的URL字符串
+ * @return 解码后的字符串
+ */
+std::string Server::urlDecode(const std::string& value) {
+    std::string result;
+    result.reserve(value.size());  // 预分配内存，提升效率
+
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '+') {
+            // 处理查询参数中的空格（+ 对应空格）
+            result += ' ';
+        } else if (value[i] == '%' && i + 2 < value.size()) {
+            // 提取 % 后的两个十六进制字符
+            char c1 = value[i + 1];
+            char c2 = value[i + 2];
+
+            // 检查是否为有效的十六进制字符（0-9, a-f, A-F）
+            auto isHexChar = [](char c) {
+                return (c >= '0' && c <= '9') ||
+                       (c >= 'a' && c <= 'f') ||
+                       (c >= 'A' && c <= 'F');
+            };
+
+            if (!isHexChar(c1) || !isHexChar(c2)) {
+                // 无效的十六进制字符，保留 % 并继续
+                result += value[i];
+                continue;
+            }
+
+            // 转换十六进制字符串为字节值（避免使用 stoi 减少异常）
+            auto hexToByte = [](char c) {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                return 10 + (c - 'A'); // 大写字母
+            };
+
+            unsigned char byte = (hexToByte(c1) << 4) | hexToByte(c2);
+            result += static_cast<char>(byte);
+            i += 2;  // 跳过已处理的两个字符
+        } else {
+            // 普通字符直接添加（包括 ASCII 和 UTF-8 多字节的后续字节）
+            result += value[i];
+        }
+    }
+
+    return result;
+}
+
+/**
+ * 解析URL查询参数字符串，将其转换为键值对映射
+ * @param query 包含查询参数的字符串，格式为"key1=value1&key2=value2..."
+ * @return 包含解析后的键值对的map，其中值经过URL解码
+ */
+std::map<std::string, std::string> Server::parseQueryParams(const std::string& query) {
+    std::map<std::string, std::string> params;  // 存储解析后的键值对
+    std::istringstream iss(query);              // 使用字符串流处理查询字符串
+    std::string pair;                          // 存储单个键值对字符串
+    
+    // 按 '&' 分割查询字符串，逐个处理键值对
+    while (std::getline(iss, pair, '&')) {
+        size_t pos = pair.find('=');           // 查找 '=' 的位置
+        if (pos != std::string::npos) {        // 如果找到 '='
+            std::string key = pair.substr(0, pos);      // 提取键
+            std::string value = pair.substr(pos + 1);   // 提取值
+            params[key] = urlDecode(value);    // 对值进行URL解码并存入map
+        }
+    }
+    
+    return params;
+}  // 返回解析后的参数map
+
+void Server::printRegisteredRoutes() const {
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "Registered API Routes:" << std::endl;
+    std::cout << "========================================" << std::endl;
+    
+    if (routes_.empty()) {
+        std::cout << "  (No routes registered)" << std::endl;
+    } else {
+        // 按HTTP方法分组显示
+        const std::vector<std::string> methods = {"GET", "POST", "PUT", "DELETE"};
+        
+        for (const auto& method : methods) {
+            if (routes_.find(method) != routes_.end()) {
+                const auto& methodRoutes = routes_.at(method);
+                if (!methodRoutes.empty()) {
+                    std::cout << "\n  " << method << ":" << std::endl;
+                    for (const auto& route : methodRoutes) {
+                        std::cout << "    " << route.first << std::endl;
+                    }
+                }
+            }
+        }
+    }
+    
+    std::cout << "========================================" << std::endl;
+}
+
+std::string getFormattedDate() {
+    std::time_t now = std::time(nullptr);
+    std::tm* timeInfo = std::localtime(&now);
+    
+    std::ostringstream oss;
+    oss << std::put_time(timeInfo, "%d/%b/%Y:%H:%M:%S");
+    
+    // 获取时区偏移（简化版，显示+0800格式）
+#ifdef _WIN32
+    // Windows上的时区处理
+    TIME_ZONE_INFORMATION tzInfo;
+    GetTimeZoneInformation(&tzInfo);
+    int offset = -tzInfo.Bias / 60;  // Bias是以分钟为单位，需要转换为小时
+#else
+    // Linux上的时区处理
+    int offset = timeInfo->tm_gmtoff / 3600;
+#endif
+    
+    oss << " " << std::showpos << std::setfill('0') << std::setw(3) 
+        << offset << "00";
+    
+    return oss.str();
+}
+
+std::string Server::getClientIP(const sockaddr_in *clientAddress) {
+    if (!clientAddress) {
+        return "unknown";
+    }
+    
+    char ipStr[INET_ADDRSTRLEN];
+#ifdef _WIN32
+    InetNtopA(AF_INET, &(clientAddress->sin_addr), ipStr, INET_ADDRSTRLEN);
+#else
+    inet_ntop(AF_INET, &(clientAddress->sin_addr), ipStr, INET_ADDRSTRLEN);
+#endif
+    
+    return std::string(ipStr);
+}
+
+Server* Server::getInstance() {
+    return instance_;
+}
+
