@@ -29,6 +29,7 @@ CMakeUserPresets.json
 out/
 .localhistory/
 
+.vscode/
 # ==========================
 # 通用 C++ 构建产物（忽略）
 # ==========================
