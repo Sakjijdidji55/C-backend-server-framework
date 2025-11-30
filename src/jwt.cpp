@@ -50,6 +50,7 @@ JWT* JWT::instance_ = nullptr;
  */
 JWT::JWT(const std::string& expiresIn, const std::string& jwtRsaPrivateKeyPath) : algorithm_(Algorithm::HS256), defaultTTL_(3600) {
     // 检查是否已存在JWT实例，如果存在则输出错误信息
+    // Check if JWT instance already exists, output error message if it does
     if (instance_ != nullptr) {
         std::cerr<<"JWT instance already exists" << std::endl;
         return;
@@ -88,11 +89,14 @@ void JWT::setSecret(const std::string& secret) {
  */
 void JWT::loadSecretFromFile(const std::string& path) {
     // 以二进制模式打开文件
+    // Open file in binary mode
     std::ifstream file(path, std::ios::binary);
 
     // 检查文件是否成功打开
+    // Check if file opened successfully
     if (!file.is_open()) {
         // 如果文件打开失败，抛出运行时异常
+    // Throw runtime exception if file opening fails
         throw std::runtime_error("Failed to open secret file: " + path);
     }
 
@@ -169,6 +173,7 @@ bool JWT::verifyToken(const std::string& token, std::string* payloadJson) const 
     }
 
     // 分割令牌为三部分（头部、载荷、签名）
+    // Split token into three parts (header, payload, signature)
     const auto parts = splitToken(token);
     // 检查令牌是否由三部分组成
     if (parts.size() != 3) {

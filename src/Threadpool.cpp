@@ -8,7 +8,9 @@
 
 /**
  *  线程池构造函数，初始化指定数量的工作线程
+ *  Thread pool constructor, initializes specified number of worker threads
  * @param numThreads  线程池中工作线程的数量
+ * @param numThreads  Number of worker threads in the thread pool
  */
 ThreadPool::ThreadPool(size_t numThreads): running_(true) {
     // 创建指定数量的工作线程
@@ -50,7 +52,9 @@ ThreadPool::ThreadPool(size_t numThreads): running_(true) {
 
 /**
  * ThreadPool析构函数
+ * ThreadPool destructor
  * 用于清理线程池资源
+ * Used to clean up thread pool resources
  */
 ThreadPool::~ThreadPool() {
     // 使用互斥锁保护共享变量running_

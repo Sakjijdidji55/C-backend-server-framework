@@ -7,6 +7,7 @@
 #include <utility>
 
 // ========== JsonValue 实现 ==========
+// ========== JsonValue Implementation ==========
 
 JsonValue::JsonValue() : type_(NULL_TYPE), numberValue_(0), boolValue_(false) {}
 

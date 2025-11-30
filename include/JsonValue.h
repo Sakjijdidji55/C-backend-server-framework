@@ -19,89 +19,123 @@
  * - BOOLEAN: 布尔值
  * - OBJECT: 对象（键值对映射）
  * - ARRAY: 数组
+ * 
+ * @brief JSON value type class that supports nested structured JSON data
+ * 
+ * This class provides complete JSON value representation, supporting the following types:
+ * - NULL_TYPE: null value
+ * - STRING: string value
+ * - NUMBER: numeric value (integer or floating point)
+ * - BOOLEAN: boolean value
+ * - OBJECT: object (key-value pair mapping)
+ * - ARRAY: array
  */
 class JsonValue {
 public:
     /**
      * @brief JSON值类型枚举
+     * @brief JSON value type enumeration
      */
     enum Type {
-        NULL_TYPE,  ///< null类型
-        STRING,     ///< 字符串类型
-        NUMBER,     ///< 数字类型
-        BOOLEAN,    ///< 布尔类型
-        OBJECT,     ///< 对象类型
-        ARRAY       ///< 数组类型
+        NULL_TYPE,  ///< null类型 (null type)
+        STRING,     ///< 字符串类型 (string type)
+        NUMBER,     ///< 数字类型 (numeric type)
+        BOOLEAN,    ///< 布尔类型 (boolean type)
+        OBJECT,     ///< 对象类型 (object type)
+        ARRAY       ///< 数组类型 (array type)
     };
 
     /**
      * @brief 默认构造函数，创建null值
+     * @brief Default constructor, creates a null value
      */
     JsonValue();
 
     /**
      * @brief 从字符串构造JsonValue
      * @param value 字符串值
+     * @brief Construct JsonValue from string
+     * @param value String value
      */
     explicit JsonValue(std::string  value);
 
     /**
      * @brief 从C风格字符串构造JsonValue
      * @param value C风格字符串
+     * @brief Construct JsonValue from C-style string
+     * @param value C-style string
      */
     explicit JsonValue(const char* value);
 
     /**
      * @brief 从整数构造JsonValue
      * @param value 整数值
+     * @brief Construct JsonValue from integer
+     * @param value Integer value
      */
     explicit JsonValue(int value);
 
     /**
      * @brief 从浮点数构造JsonValue
      * @param value 浮点数值
+     * @brief Construct JsonValue from floating-point number
+     * @param value Floating-point value
      */
     explicit JsonValue(double value);
 
     /**
      * @brief 从布尔值构造JsonValue
      * @param value 布尔值
+     * @brief Construct JsonValue from boolean
+     * @param value Boolean value
      */
     explicit JsonValue(bool value);
 
     /**
      * @brief 从对象映射构造JsonValue
      * @param value 对象映射
+     * @brief Construct JsonValue from object map
+     * @param value Object map
      */
     explicit JsonValue(const std::map<std::string, JsonValue>& value);
 
     /**
      * @brief 从JsonValue数组构造JsonValue
      * @param value JsonValue数组
+     * @brief Construct JsonValue from JsonValue array
+     * @param value JsonValue array
      */
     explicit JsonValue(const std::vector<JsonValue>& value);
 
     /**
      * @brief 从map数组构造JsonValue
      * @param value map数组
+     * @brief Construct JsonValue from map array
+     * @param value Map array
      */
     explicit JsonValue(const std::vector<std::map<std::string, std::string>>& value);
 
     /**
      * @brief 从字符串数组构造JsonValue
      * @param value 字符串数组
+     * @brief Construct JsonValue from string array
+     * @param value String array
      */
     explicit JsonValue(const std::vector<std::string>& value);
 
     /**
      * @brief 获取值的类型
      * @return 值的类型
+     * @brief Get the type of the value
+     * @return The type of the value
      */
     [[nodiscard]] Type getType() const { return type_; }
 
     /**
      * @brief 获取字符串值
      * @return 字符串值，如果类型不是STRING则返回空字符串
+     * @brief Get string value
+     * @return String value, returns empty string if type is not STRING
      */
     [[nodiscard]] std::string asString() const;
 

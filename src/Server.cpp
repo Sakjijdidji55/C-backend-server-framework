@@ -26,8 +26,11 @@
 
 /**
  * 将map转换为JSON格式的字符串
+ * Convert map to JSON formatted string
  * @param mp 输入的map，键值类型均为string
+ * Input map with string key and value types
  * @return 返回JSON格式的字符串
+ * Returns JSON formatted string
  */
 std::string mpToJson(const std::map<std::string, std::string>& mp) {
     std::string json = "{";  // 初始化JSON字符串，开始标记
@@ -78,6 +81,8 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
 /**
  * 注册信号处理函数，用于处理程序终止信号
  * 根据不同操作系统平台设置相应的信号处理机制
+ * Register signal handlers for program termination signals
+ * Configure appropriate signal handling mechanisms based on different operating systems
  */
 void Server::registerSignalHandlers() {
 #ifdef _WIN32
@@ -201,6 +206,7 @@ void Server::run() {
         }
 
         // 将客户端连接处理任务添加到线程池
+// Add client connection processing task to thread pool
         // Server.cpp 第221行附近，修改线程池添加任务的代码
         // Server.cpp 第221行，替换原 lambda 调用
         bool state = threadpool_.addTask(
@@ -219,6 +225,8 @@ void Server::run() {
 /**
  * 停止服务器函数
  * 该函数用于安全地关闭服务器，释放相关资源
+ * Stop server function
+ * This function safely shuts down the server and releases related resources
  */
 void Server::stop() {
     // 检查服务器是否已经停止，如果已停止则直接返回
@@ -248,6 +256,9 @@ void Server::stop() {
  * 处理客户端请求的函数
  * @param clientSocket 客户端套接字描述符
  * @param clientAddress 客户端地址结构指针
+ * Handle client request function
+ * @param clientSocket Client socket descriptor
+ * @param clientAddress Client address structure pointer
  */
 void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
     // 创建缓冲区并初始化为0，用于接收客户端数据
@@ -301,6 +312,7 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
     send(clientSocket, responseStr.c_str(), responseStr.length(), 0);
 
     // 打印访问日志（类似Apache/Nginx格式）
+// Print access log (similar to Apache/Nginx format)
     std::string clientIP = getClientIP(clientAddress);
     std::lock_guard<std::mutex> lock(logMutex_);
     std::cout << clientIP << " - - [" << getFormattedDate() << "] \"" 
@@ -400,10 +412,15 @@ std::string Server::buildResponse(const Response& response) {
     oss << "HTTP/1.1 " << response.statusCode << " ";
     switch (response.statusCode) {
         case 200: oss << "OK"; break;      // 200 OK - 请求成功
+// 200 OK - Request successful
         case 201: oss << "Created"; break;  // 201 Created - 资源创建成功
+// 201 Created - Resource created successfully
         case 400: oss << "Bad Request"; break;  // 400 Bad Request - 客户端请求错误
+// 400 Bad Request - Client request error
         case 404: oss << "Not Found"; break;    // 404 Not Found - 资源未找到
+// 404 Not Found - Resource not found
         case 500: oss << "Internal Server Error"; break;  // 500 Internal Server Error - 服务器内部错误
+// 500 Internal Server Error - Server internal error
         default: oss << "Unknown"; break;   // 未知状态码
     }
     oss << "\r\n";  // HTTP协议使用\r\n作为换行符
@@ -503,6 +520,7 @@ std::string Server::urlDecode(const std::string& value) {
 
 /**
  * 解析URL查询参数字符串，将其转换为键值对映射
+ * Parse URL query parameter string and convert to key-value pair map
  * @param query 包含查询参数的字符串，格式为"key1=value1&key2=value2..."
  * @return 包含解析后的键值对的map，其中值经过URL解码
  */

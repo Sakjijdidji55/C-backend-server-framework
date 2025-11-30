@@ -3,12 +3,12 @@
 #include "include/route.h"
 
 int main() {
-    std::cout << "Hello, World!" << std::endl;
-    // 创建服务器
+    // 创建服务器 Create server
     Server app(std::stoi("8080"));
+
     registerRoutes(app);
 
-    // 启动服务器
+    // 启动服务器 Start server
     app.run();
     return 0;
 }

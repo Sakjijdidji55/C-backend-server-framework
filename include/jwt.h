@@ -22,25 +22,39 @@
 #include <iomanip>
 #include <random>
 
+// JWT类，用于生成和验证JSON Web Token
+// JWT class for generating and verifying JSON Web Tokens
 class JWT {
 public:
+    // 加密算法枚举
+    // Encryption algorithm enumeration
     enum class Algorithm {
         HS256
     };
 
+    // 构造函数，设置过期时间和密钥路径
+    // Constructor, set expiration time and key path
     explicit JWT(const std::string& expiresIn="", const std::string& jwtRsaPrivateKeyPath="");
+    // 构造函数，设置密钥和默认过期时间（秒）
+    // Constructor, set secret key and default TTL (seconds)
     explicit JWT(std::string secret, long long ttlSeconds = 3600);
 
     void setSecret(const std::string& secret);
     void loadSecretFromFile(const std::string& path);
     void setDefaultTTL(long long ttlSeconds);
 
+    // 生成令牌
+    // Generate token
     [[nodiscard]] std::string generateToken(const std::map<std::string, std::string>& customClaims = {},
                                             long long ttlSeconds = -1) const;
 
+    // 验证令牌
+    // Verify token
     [[nodiscard]] bool verifyToken(const std::string& token,
                                    std::string* payloadJson = nullptr) const;
 
+    // 获取载荷中的声明
+    // Get claims from payload
     [[nodiscard]] std::optional<std::map<std::string, std::string>> parseClaims(const std::string& token) const;
 
     [[nodiscard]] Algorithm algorithm() const;
@@ -52,10 +66,18 @@ public:
     static JWT* getInstance();
 
 private:
+    // Base64 URL编码
+    // Base64 URL encode
     static std::string base64UrlEncode(const std::string& data);
+    // Base64 URL解码
+    // Base64 URL decode
     static std::string base64UrlDecode(const std::string& data);
 
+    // SHA-256哈希
+    // SHA-256 hash
     static std::string sha256(const std::string& data);
+    // HMAC-SHA256哈希
+    // HMAC-SHA256 hash
     static std::string hmacSha256(const std::string& data, const std::string& key);
 
     static std::string buildHeader();

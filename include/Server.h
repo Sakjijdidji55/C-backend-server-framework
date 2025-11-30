@@ -29,6 +29,7 @@ std::string mpToJson(const std::map<std::string, std::string>& mp);
 std::string getFormattedDate();
 
 // 请求结构
+// Request structure
 struct Request {
     std::string method;
     std::string path;
@@ -65,6 +66,7 @@ struct Request {
 };
 
 // 响应结构
+// Response structure
 struct Response {
     int statusCode = 200;
     std::map<std::string, std::string> headers;
@@ -124,23 +126,39 @@ struct Response {
 typedef std::function<void(const Request&, Response&)> Handler;
 
 // 简单的HTTP服务器类
+// Simple HTTP server class
 class Server {
 public:
+    // 构造函数，初始化服务器端口
+    // Constructor, initialize server port
     explicit Server(int port = 8080);
+    // 析构函数
+    // Destructor
     ~Server();
     
-    // 注册路由
+    // 注册路由 - GET方法
+    // Register route - GET method
     void get(const std::string& path, Handler handler);
+    // 注册路由 - POST方法
+    // Register route - POST method
     void post(const std::string& path, Handler handler);
+    // 注册路由 - PUT方法
+    // Register route - PUT method
     void put(const std::string& path, Handler handler);
+    // 注册路由 - DELETE方法
+    // Register route - DELETE method
     void del(const std::string& path, Handler handler);
     
     // 启动服务器
+    // Start server
     void run();
     
     // 停止服务器
+    // Stop server
     void stop();
 
+    // 获取服务器实例（单例模式）
+    // Get server instance (singleton pattern)
     static Server* getInstance();
 private:
     int port_;
