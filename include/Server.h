@@ -16,8 +16,12 @@
 
 
 #ifdef _WIN32
-#include <winsock2.h>    // 先包含winsock2.h
-#include <windows.h>     // 再包含windows.h
+#include <winsock2.h>    // Windows平台网络头文件
+#include <windows.h>
+#else
+#include <sys/socket.h>  // Linux/Unix平台网络头文件
+#include <netinet/in.h>  // 包含sockaddr_in定义
+#include <arpa/inet.h>
 #endif
 
 #include "Threadpool.h"
