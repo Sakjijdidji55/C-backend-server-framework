@@ -22,7 +22,13 @@
     #include <netinet/in.h>
     #include <arpa/inet.h>
     #include <unistd.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <netdb.h>     // 包含 hostent、gethostbyname、addrinfo、getaddrinfo（Linux/macOS）
+    #include <unistd.h>    // 包含 close（Linux/macOS）
 #endif
+
 
 /**
  * 将map转换为JSON格式的字符串
