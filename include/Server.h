@@ -201,6 +201,12 @@ private:
     static std::string getClientIP(const sockaddr_in *clientAddress) ;
 
     static std::string urlDecode(const std::string &value);
+
+    static std::string getLanIpv4();
+
+    void listenIPv6(int serverSocketIPv6);
+
+    static std::string getLanIpv6();
 };
 
 #endif // SERVER_H

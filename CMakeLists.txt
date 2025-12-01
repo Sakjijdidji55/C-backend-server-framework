@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)  # 降低版本要求以提高兼容性
-project(backend_server VERSION 1.0.0 LANGUAGES CXX)  # 规范项目名称和版本
+project(CBSF VERSION 1.0.0 LANGUAGES CXX)  # 规范项目名称和版本
 
 # 设置C++标准
 set(CMAKE_CXX_STANDARD 20)

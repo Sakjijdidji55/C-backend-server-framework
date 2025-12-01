@@ -147,6 +147,28 @@ void Server::run() {
 #endif
         return;
     }
+
+    // 2. （可选）创建 IPv6 socket（如需支持 IPv6 客户端）
+    int serverSocketIPv6 = socket(AF_INET6, SOCK_STREAM, 0);
+    if (serverSocketIPv6 >= 0) {
+        // 允许 IPv6 socket 同时接受 IPv4 连接（Windows/Linux 通用）
+        int opt = 0;
+        setsockopt(serverSocketIPv6, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&opt, sizeof(opt));
+        // 绑定 IPv6 所有接口（::）
+        struct sockaddr_in6 addr6{};
+        addr6.sin6_family = AF_INET6;
+        addr6.sin6_addr = in6addr_any; // 监听所有 IPv6 接口
+        addr6.sin6_port = htons(port_);
+        if (bind(serverSocketIPv6, (struct sockaddr*)&addr6, sizeof(addr6)) == 0) {
+            listen(serverSocketIPv6, 10);
+            // 需单独开线程监听 IPv6 连接（类似 IPv4 逻辑）
+            std::thread([this, serverSocketIPv6]() {
+                listenIPv6(serverSocketIPv6);
+            }).detach();
+        } else {
+            close(serverSocketIPv6);
+        }
+    }
     
     // 设置socket选项，允许地址重用
     // 设置SO_REUSEADDR选项，避免端口占用问题
@@ -186,7 +208,14 @@ void Server::run() {
     
     // 打印注册的路由信息
     printRegisteredRoutes();
-    std::cout << "Server running on http://localhost:" << port_ << std::endl;
+    std::cout << "Server running on:" << std::endl;
+    std::cout << "  Localhost: http://localhost:" << port_ << std::endl;
+    std::cout << "  LAN IPv4:  http://" << getLanIpv4() << ":" << port_ << std::endl;
+    std::cout << "  Localhost IPv6: http://[::1]:" << port_ << std::endl;
+    std::string ipv6 = getLanIpv6();
+    if (ipv6 != "::1") { // 仅当获取到有效局域网 IPv6 时打印
+        std::cout << "  LAN IPv6:      http://[" << ipv6 << "]:" << port_ << std::endl;
+    }
     std::cout << "========================================" << std::endl;
     
     // 接受连接
@@ -220,6 +249,175 @@ void Server::run() {
             std::cout<<"Failed to add task to thread pool" << std::endl;
         }
     }
+}
+
+void Server::listenIPv6(int serverSocketIPv6) {
+    while (running_) {
+        struct sockaddr_in6 clientAddr6{};
+        socklen_t clientAddrLen = sizeof(clientAddr6);
+        int clientSocket = accept(serverSocketIPv6, (struct sockaddr*)&clientAddr6, &clientAddrLen);
+        if (clientSocket < 0) {
+            if (running_) std::cerr << "Error: Failed to accept IPv6 connection" << std::endl;
+            continue;
+        }
+
+        bool state = threadpool_.addTask(
+                &Server::handleClient,  // 要执行的函数
+                this,                  // 成员函数的第一个参数：this指针
+                clientSocket,          // handleClient 的第一个参数
+                (struct sockaddr_in*)&clientAddr6         // handleClient 的第二个参数（指针，原变量生命周期有效）
+        );
+
+        if (!state) {
+            std::cout<<"Failed to add task to thread pool" << std::endl;
+        }
+    }
+    close(serverSocketIPv6);
+}
+
+std::string Server::getLanIpv4() {
+    std::string lanIp = "127.0.0.1"; // 默认本地回环（获取失败时返回）
+    int sockfd = -1;
+
+#ifdef _WIN32
+    // Windows 初始化 Winsock（仅当前函数内临时使用，避免影响全局）
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        return lanIp;
+    }
+#endif
+
+    // 1. 创建 UDP socket（SOCK_DGRAM），仅用于获取本地 IP，不实际发送数据
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return lanIp;
+    }
+
+    // 2. 配置公网服务器地址（Google DNS 8.8.8.8，端口 53，仅用于触发本地路由）
+    struct sockaddr_in serverAddr{};
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(53); // DNS 端口（任意端口均可，53 是常用默认值）
+
+    // 解析 IP 地址（兼容 IPv4 字符串直接转换）
+    if (inet_pton(AF_INET, "8.8.8.8", &serverAddr.sin_addr) <= 0) {
+        // 解析失败时，尝试通过域名解析（可选，增强兼容性）
+        struct hostent* host = gethostbyname("8.8.8.8");
+        if (host == nullptr || host->h_addr_list[0] == nullptr) {
+#ifdef _WIN32
+            closesocket(sockfd);
+            WSACleanup();
+#else
+            close(sockfd);
+#endif
+            return lanIp;
+        }
+        memcpy(&serverAddr.sin_addr, host->h_addr_list[0], host->h_length);
+    }
+
+    // 3. 连接 UDP socket（UDP 是无连接协议，但 connect 仅用于绑定目标地址，不建立实际连接）
+    // 此操作会让系统自动选择本地合适的网卡（局域网网卡）和端口，从而获取局域网 IP
+    if (connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == 0) {
+        // 4. 获取本地绑定的地址（即局域网 IP）
+        struct sockaddr_in localAddr{};
+        socklen_t localAddrLen = sizeof(localAddr);
+        if (getsockname(sockfd, (struct sockaddr*)&localAddr, &localAddrLen) == 0) {
+            // 转换网络字节序 IP 到字符串
+            char ipBuf[INET_ADDRSTRLEN] = {0};
+            if (inet_ntop(AF_INET, &localAddr.sin_addr, ipBuf, sizeof(ipBuf)) != nullptr) {
+                lanIp = ipBuf;
+            }
+        }
+    }
+
+    // 5. 清理资源
+#ifdef _WIN32
+    closesocket(sockfd);
+    WSACleanup();
+#else
+    close(sockfd);
+#endif
+
+    return lanIp;
+}
+
+
+std::string Server::getLanIpv6() {
+    std::string lanIpv6 = "::1";
+    int sockfd = -1;
+
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        return lanIpv6;
+    }
+#endif
+
+    sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return lanIpv6;
+    }
+
+    struct sockaddr_in6 serverAddr{};
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin6_family = AF_INET6;
+    serverAddr.sin6_port = htons(53);
+
+    // 解析 IPv6 地址（跨平台兼容版本）
+    if (inet_pton(AF_INET6, "2001:4860:4860::8888", &serverAddr.sin6_addr) <= 0) {
+        struct addrinfo hints{}, *res = nullptr;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET6;
+        hints.ai_socktype = SOCK_DGRAM;
+
+        int ret = getaddrinfo("ipv6.google.com", nullptr, &hints, &res);
+        if (ret != 0 || res == nullptr) {
+#ifdef _WIN32
+            closesocket(sockfd);
+            WSACleanup();
+#else
+            close(sockfd);
+#endif
+            return lanIpv6;
+        }
+
+        memcpy(&serverAddr.sin6_addr,
+               &((struct sockaddr_in6*)res->ai_addr)->sin6_addr,
+               sizeof(in6_addr));
+        freeaddrinfo(res);
+    }
+
+    if (connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == 0) {
+        struct sockaddr_in6 localAddr{};
+        socklen_t localAddrLen = sizeof(localAddr);
+        if (getsockname(sockfd, (struct sockaddr*)&localAddr, &localAddrLen) == 0) {
+            uint8_t* addrBytes = localAddr.sin6_addr.s6_addr;
+            bool isLinkLocal = (addrBytes[0] == 0xfe && (addrBytes[1] & 0xc0) == 0x80);
+            bool isLoopback = (memcmp(addrBytes, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01", 16) == 0);
+
+            if (!isLinkLocal && !isLoopback) {
+                char ipBuf[INET6_ADDRSTRLEN] = {0};
+                if (inet_ntop(AF_INET6, &localAddr.sin6_addr, ipBuf, sizeof(ipBuf)) != nullptr) {
+                    lanIpv6 = ipBuf;
+                }
+            }
+        }
+    }
+
+#ifdef _WIN32
+    closesocket(sockfd);
+    WSACleanup();
+#else
+    close(sockfd);
+#endif
+
+    return lanIpv6;
 }
 
 /**
