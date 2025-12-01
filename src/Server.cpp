@@ -134,8 +134,6 @@ void Server::del(const std::string& path, Handler handler) {
  */
 void Server::run() {
 #ifdef _WIN32
-    // Windows平台特定的网络初始化
-    // 初始化Winsock库，版本为2.2
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         std::cerr << "Error: Failed to initialize Winsock" << std::endl;
@@ -143,142 +141,183 @@ void Server::run() {
     }
 #endif
 
-    // 创建socket
-    // 使用IPv4(TCP)协议创建流式socket
+    // 1. 创建并绑定IPv4 socket
     serverSocket_ = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket_ < 0) {
-        std::cerr << "Error: Failed to create socket" << std::endl;
-#ifdef _WIN32
-        WSACleanup();  // Windows平台清理网络环境
-#endif
-        return;
-    }
-
-    // 2. （可选）创建 IPv6 socket（如需支持 IPv6 客户端）
-    int serverSocketIPv6 = socket(AF_INET6, SOCK_STREAM, 0);
-    if (serverSocketIPv6 >= 0) {
-        // 允许 IPv6 socket 同时接受 IPv4 连接（Windows/Linux 通用）
-        int opt = 0;
-        setsockopt(serverSocketIPv6, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&opt, sizeof(opt));
-        // 绑定 IPv6 所有接口（::）
-        struct sockaddr_in6 addr6{};
-        addr6.sin6_family = AF_INET6;
-        addr6.sin6_addr = in6addr_any; // 监听所有 IPv6 接口
-        addr6.sin6_port = htons(port_);
-        if (bind(serverSocketIPv6, (struct sockaddr*)&addr6, sizeof(addr6)) == 0) {
-            listen(serverSocketIPv6, 10);
-            // 需单独开线程监听 IPv6 连接（类似 IPv4 逻辑）
-            std::thread([this, serverSocketIPv6]() {
-                listenIPv6(serverSocketIPv6);
-            }).detach();
-        } else {
-            close(serverSocketIPv6);
-        }
-    }
-    
-    // 设置socket选项，允许地址重用
-    // 设置SO_REUSEADDR选项，避免端口占用问题
-    int opt = 1;
-    setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
-    
-    // 绑定地址
-    // 准备服务器地址结构
-    struct sockaddr_in address{};
-    memset(&address, 0, sizeof(address));  // 清零地址结构
-    address.sin_family = AF_INET;          // 使用IPv4
-    address.sin_addr.s_addr = INADDR_ANY;  // 监听所有可用接口
-    address.sin_port = htons(port_);       // 设置端口
-    
-    // 绑定socket到指定端口
-    if (bind(serverSocket_, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        std::cerr << "Error: Failed to bind to port " << port_ << std::endl;
-        close(serverSocket_);
-#ifdef _WIN32
-        WSACleanup();  // Windows平台清理网络环境
-#endif
-        return;
-    }
-    
-    // 监听
-    // 开始监听socket，设置最大连接数为10
-    if (listen(serverSocket_, 10) < 0) {
-        std::cerr << "Error: Failed to listen on socket" << std::endl;
-        close(serverSocket_);
+        std::cerr << "Error: Failed to create IPv4 socket" << std::endl;
 #ifdef _WIN32
         WSACleanup();
 #endif
         return;
     }
-    
+
+    // 设置socket选项
+    int opt = 1;
+#ifdef _WIN32
+    setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+#else
+    setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+
+    // 绑定IPv4地址
+    struct sockaddr_in address{};
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port_);  // 使用port_成员变量
+
+    if (bind(serverSocket_, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        std::cerr << "Error: Failed to bind IPv4 to port " << port_
+                  << ": " << strerror(errno) << std::endl;
+#ifdef _WIN32
+        closesocket(serverSocket_);
+        WSACleanup();
+#else
+        close(serverSocket_);
+#endif
+        return;
+    }
+
+    // 2. 创建并绑定IPv6 socket
+    int serverSocketIPv6 = -1;
+    serverSocketIPv6 = socket(AF_INET6, SOCK_STREAM, 0);
+    if (serverSocketIPv6 < 0) {
+        std::cerr << "Warning: Failed to create IPv6 socket: "
+                  << strerror(errno) << std::endl;
+        // 不退出，继续使用IPv4
+    } else {
+        // 设置socket选项
+#ifdef _WIN32
+        setsockopt(serverSocketIPv6, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+#else
+        setsockopt(serverSocketIPv6, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+
+        // 在Windows上需要设置IPV6_V6ONLY
+#ifdef _WIN32
+        int ipv6Only = 1;
+        setsockopt(serverSocketIPv6, IPPROTO_IPV6, IPV6_V6ONLY,
+                   (const char*)&ipv6Only, sizeof(ipv6Only));
+#endif
+
+        // 绑定IPv6地址 - 使用相同的端口号
+        struct sockaddr_in6 addr6{};
+        memset(&addr6, 0, sizeof(addr6));
+        addr6.sin6_family = AF_INET6;
+        addr6.sin6_addr = in6addr_any;
+        addr6.sin6_port = htons(port_);  // 使用port_成员变量，确保端口一致
+
+        if (bind(serverSocketIPv6, (struct sockaddr*)&addr6, sizeof(addr6)) < 0) {
+            std::cerr << "Warning: Failed to bind IPv6 to port " << port_
+                      << ": " << strerror(errno) << std::endl;
+#ifdef _WIN32
+            closesocket(serverSocketIPv6);
+#else
+            close(serverSocketIPv6);
+#endif
+            serverSocketIPv6 = -1;  // 标记为无效
+        }
+    }
+
+    // 3. 开始监听
+    if (listen(serverSocket_, 10) < 0) {
+        std::cerr << "Error: Failed to listen on IPv4 socket: "
+                  << strerror(errno) << std::endl;
+#ifdef _WIN32
+        closesocket(serverSocket_);
+        if (serverSocketIPv6 >= 0) closesocket(serverSocketIPv6);
+        WSACleanup();
+#else
+        close(serverSocket_);
+        if (serverSocketIPv6 >= 0) close(serverSocketIPv6);
+#endif
+        return;
+    }
+
+    // 如果IPv6 socket创建并绑定成功，开始监听
+    if (serverSocketIPv6 >= 0) {
+        if (listen(serverSocketIPv6, 10) < 0) {
+            std::cerr << "Warning: Failed to listen on IPv6 socket: "
+                      << strerror(errno) << std::endl;
+#ifdef _WIN32
+            closesocket(serverSocketIPv6);
+#else
+            close(serverSocketIPv6);
+#endif
+            serverSocketIPv6 = -1;
+        } else {
+            std::cout << "IPv6 socket listening on [::]:" << port_ << std::endl;
+            // 启动独立线程监听IPv6连接
+            std::thread([this, serverSocketIPv6]() {
+                this->listenIPv6(serverSocketIPv6);
+            }).detach();
+        }
+    }
+
     running_ = true;
-    
-    // 打印注册的路由信息
+
+    // 打印服务器信息
     printRegisteredRoutes();
     std::cout << "Server running on:" << std::endl;
     std::cout << "  Localhost: http://localhost:" << port_ << std::endl;
     std::cout << "  LAN IPv4:  http://" << getLanIpv4() << ":" << port_ << std::endl;
     std::cout << "  Localhost IPv6: http://[::1]:" << port_ << std::endl;
-    std::string ipv6 = getLanIpv6();
-    if (ipv6 != "::1") { // 仅当获取到有效局域网 IPv6 时打印
-        std::cout << "  LAN IPv6:      http://[" << ipv6 << "]:" << port_ << std::endl;
+    if (serverSocketIPv6 >= 0) {
+        std::cout << "  LAN IPv6:  http://["<< getLanIpv6() << "]:" << port_ << std::endl;
     }
-    std::cout << "========================================" << std::endl;
-    
-    // 接受连接
-    // 主循环，持续接受客户端连接
+    std::cout << "==========================================="<< std::endl;
+
+    // 主循环接受IPv4连接
     while (running_) {
-        // 准备客户端地址结构
         struct sockaddr_in clientAddress{};
         socklen_t clientAddrLen = sizeof(clientAddress);
-        
-        // 接受新的客户端连接
-        int clientSocket = accept(serverSocket_, (struct sockaddr*)&clientAddress, &clientAddrLen);
+
+        int clientSocket = accept(serverSocket_,
+                                  (struct sockaddr*)&clientAddress,
+                                  &clientAddrLen);
         if (clientSocket < 0) {
             if (running_) {
-                std::cerr << "Error: Failed to accept connection" << std::endl;
+                std::cerr << "Error: Failed to accept IPv4 connection: "
+                          << strerror(errno) << std::endl;
             }
             continue;
         }
 
-        // 将客户端连接处理任务添加到线程池
-// Add client connection processing task to thread pool
-        // Server.cpp 第221行附近，修改线程池添加任务的代码
-        // Server.cpp 第221行，替换原 lambda 调用
-        bool state = threadpool_.addTask(
-                &Server::handleClient,  // 要执行的函数
-                this,                  // 成员函数的第一个参数：this指针
-                clientSocket,          // handleClient 的第一个参数
-                &clientAddress         // handleClient 的第二个参数（指针，原变量生命周期有效）
-        );
-
-        if (!state) {
-            std::cout<<"Failed to add task to thread pool" << std::endl;
-        }
+        // 添加到线程池
+        threadpool_.addTask(&Server::handleClient, this,
+                            clientSocket, &clientAddress);
     }
 }
 
 void Server::listenIPv6(int serverSocketIPv6) {
     while (running_) {
-        struct sockaddr_in6 clientAddr6{};
-        socklen_t clientAddrLen = sizeof(clientAddr6);
-        int clientSocket = accept(serverSocketIPv6, (struct sockaddr*)&clientAddr6, &clientAddrLen);
+        struct sockaddr_storage clientAddr{};  // 使用sockaddr_storage通用结构
+        socklen_t clientAddrLen = sizeof(clientAddr);
+
+        int clientSocket = accept(serverSocketIPv6,
+                                  (struct sockaddr*)&clientAddr,
+                                  &clientAddrLen);
         if (clientSocket < 0) {
-            if (running_) std::cerr << "Error: Failed to accept IPv6 connection" << std::endl;
+            if (running_) {
+                std::cerr << "Error: Failed to accept IPv6 connection: "
+                          << strerror(errno) << std::endl;
+            }
             continue;
         }
 
-        bool state = threadpool_.addTask(
-                &Server::handleClient,  // 要执行的函数
-                this,                  // 成员函数的第一个参数：this指针
-                clientSocket,          // handleClient 的第一个参数
-                (struct sockaddr_in*)&clientAddr6         // handleClient 的第二个参数（指针，原变量生命周期有效）
-        );
-
-        if (!state) {
-            std::cout<<"Failed to add task to thread pool" << std::endl;
+        // 根据地址族传递正确的参数
+        if (clientAddr.ss_family == AF_INET6) {
+            threadpool_.addTask(&Server::handleClient, this,
+                                clientSocket,
+                                (struct sockaddr_in*)&clientAddr);
         }
     }
+
+#ifdef _WIN32
+    closesocket(serverSocketIPv6);
+#else
     close(serverSocketIPv6);
+#endif
 }
 
 std::string Server::getLanIpv4() {
