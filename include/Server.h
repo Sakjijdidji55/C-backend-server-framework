@@ -42,7 +42,7 @@ struct Request {
     std::map<std::string, std::string> headers;
     std::string body;
     std::map<std::string, std::string> queryParams;  // 查询参数
-    std::map<std::string, std::string> bodyParams;   // 表单参数或JSON参数
+    std::map<std::string, JsonValue> bodyParams;   // 表单参数或JSON参数
     std::unique_ptr<JsonValue> jsonBody;            // 解析后的JSON对象（如果适用）
 
     [[nodiscard]] std::string query_param(const std::string& key) const {
@@ -68,7 +68,7 @@ struct Request {
         } else {
             std::cout << "Body Parameters (key-value):\n";
             for (const auto& [key, value] : bodyParams) {
-                std::cout << "  " << key << " = " << value << "\n";
+                std::cout << "  " << key << " = " << value.toJson() << "\n";
             }
         }
     }
@@ -115,14 +115,14 @@ struct Request {
             parseMultipartFormData();
         } else if (contentType == "text/plain") {
             // 纯文本，直接存储
-            bodyParams["_raw_text"] = body;
+            bodyParams["_raw_text"] = JsonValue(body);
         } else if (contentType.empty()) {
             // 没有Content-Type，尝试自动检测
             autoDetectContentType();
         } else {
             // 未知类型，作为原始文本处理
             std::cerr << "Warning: Unknown Content-Type: " << contentType << "\n";
-            bodyParams["_raw_data"] = body;
+            bodyParams["_raw_data"] = JsonValue(body);
         }
     }
 
@@ -192,10 +192,10 @@ private:
                 key = urlDecode(key);
                 value = urlDecode(value);
 
-                bodyParams[key] = value;
+                bodyParams[key] = JsonValue(value);
             } else {
                 // 只有key没有value的情况
-                bodyParams[urlDecode(pair)] = "";
+                bodyParams[urlDecode(pair)] = JsonValue("");
             }
         }
     }
@@ -214,15 +214,15 @@ private:
                 flattenJsonToParams(*jsonBody, "");
             } else if (jsonBody->getType() == JsonValue::ARRAY) {
                 // 数组类型的JSON，存储到特殊键
-                bodyParams["_json_array"] = jsonBody->toJson();
+                bodyParams["_json_array"] = *jsonBody;
             } else {
                 // 其他基本类型
-                bodyParams["_json_value"] = jsonToString(*jsonBody);
+                bodyParams["_json_value"] = *jsonBody;
             }
         } catch (const std::exception& e) {
             std::cerr << "Failed to parse JSON body: " << e.what() << "\n";
             // JSON解析失败，尝试作为普通文本处理
-            bodyParams["_invalid_json"] = body;
+            bodyParams["_invalid_json"] = JsonValue(body);
         }
     }
 
@@ -242,10 +242,10 @@ private:
                     flattenJsonToParams(value, newKey);
                 } else if (value.getType() == JsonValue::ARRAY) {
                     // 数组存储为JSON字符串
-                    bodyParams[newKey] = value.toJson();
+                    bodyParams[newKey] = value;
                 } else {
                     // 基本类型转换为字符串
-                    bodyParams[newKey] = jsonToString(value);
+                    bodyParams[newKey] = value;
                 }
             }
         }
@@ -357,7 +357,7 @@ private:
         }
 
         if (!name.empty()) {
-            bodyParams[name] = content;
+            bodyParams[name] = JsonValue(content);
         }
     }
 
@@ -386,7 +386,7 @@ private:
                 // 数组形式的JSON
                 jsonBody = std::make_unique<JsonValue>();
                 jsonBody->fromJson(body);
-                bodyParams["_json_array"] = body;
+                bodyParams["_json_array"] = JsonValue(body);
                 return;
             }
         } catch (const std::exception&) {
@@ -401,7 +401,7 @@ private:
         }
 
         // 默认作为纯文本
-        bodyParams["_raw_text"] = body;
+        bodyParams["_raw_text"] = JsonValue(body);
     }
 
     /**
