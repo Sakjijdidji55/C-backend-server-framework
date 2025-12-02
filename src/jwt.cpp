@@ -462,34 +462,32 @@ std::string JWT::sha256(const std::string& data) {
  * @return 返回HMAC-SHA256签名结果
  */
 std::string JWT::hmacSha256(const std::string& data, const std::string& key) {
-    // HMAC块大小为64字节（512位）
     constexpr std::size_t blockSize = 64;
-    // 处理密钥，确保密钥长度符合HMAC要求
     std::string actualKey = key;
-    // 如果密钥长度大于块大小，则使用SHA-256哈希函数对其进行压缩
+
+    // 处理密钥
     if (actualKey.size() > blockSize) {
         actualKey = sha256(actualKey);
     }
-    // 如果密钥长度小于块大小，则在末尾填充零字节
     if (actualKey.size() < blockSize) {
         actualKey.append(blockSize - actualKey.size(), '\0');
     }
 
-
-
-    // 创建外部填充密钥和内部填充密钥
-    std::string oKeyPad(blockSize, '\0'); // 外部填充密钥
-    std::string iKeyPad(blockSize, '\0'); // 内部填充密钥
-    // 对密钥进行异或操作，生成填充密钥
+    // 创建填充密钥
+    std::string oKeyPad(blockSize, '\0');
+    std::string iKeyPad(blockSize, '\0');
     for (std::size_t i = 0; i < blockSize; ++i) {
-        oKeyPad[i] = static_cast<char>(actualKey[i] ^ 0x5c); // 外部填充：与0x5c异或
-        iKeyPad[i] = static_cast<char>(actualKey[i] ^ 0x36); // 内部填充：与0x36异或
+        oKeyPad[i] = static_cast<char>(actualKey[i] ^ 0x5c);
+        iKeyPad[i] = static_cast<char>(actualKey[i] ^ 0x36);
     }
 
-    // 计算内部哈希：内部填充密钥 + 数据，然后进行SHA-256哈希
-    std::string inner = sha256(iKeyPad + data);
-    // 计算最终哈希：外部填充密钥 + 内部哈希结果，然后进行SHA-256哈希
-    return sha256(oKeyPad + inner);
+    // 计算内部哈希：iKeyPad + data
+    std::string innerData = iKeyPad + data;
+    std::string innerHash = sha256(innerData);
+
+    // 计算最终哈希：oKeyPad + innerHash
+    std::string outerData = oKeyPad + innerHash;
+    return sha256(outerData);
 }
 
 /**
@@ -1162,11 +1160,11 @@ bool JWT::constant_time_compare(const std::vector<uint8_t>& a, const std::vector
 }
 
 /**
-     * 密码验证
-     * @param password 明文密码
-     * @param stored_hash 加密后存储的字符串（格式：salt_hex:iterations:hash_hex）
-     * @return 是否验证通过
-     */
+ * 密码验证
+ * @param password 明文密码
+ * @param stored_hash 加密后存储的字符串（格式：salt_hex:iterations:hash_hex）
+ * @return 是否验证通过
+ */
 bool JWT::verify_password(const std::string& password, const std::string& stored_hash) {
     // 1. 解析存储的哈希字符串（格式：salt_hex:iterations:hash_hex）
     size_t colon1 = stored_hash.find(':');

@@ -56,7 +56,7 @@ std::string mpToJson(const std::map<std::string, std::string>& mp) {
 // 静态成员初始化
 Server* Server::instance_ = nullptr;
 
-Server::Server(int port) : port_(port), serverSocket_(-1), running_(false), threadpool_(std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 1) {
+Server::Server(int port, bool printParams) : port_(port),serverSocket_(-1), running_(false), LogParams(printParams), threadpool_(std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 1) {
     instance_ = this;
     registerSignalHandlers(); // 注册信号处理函数
 }
@@ -504,6 +504,9 @@ void Server::stop() {
  * @param clientAddress Client address structure pointer
  */
 void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
+    std::time_t now = std::time(nullptr);
+    long long timestamp = static_cast<long long>(now) * 1000;
+
     // 创建缓冲区并初始化为0，用于接收客户端数据
     char buffer[8192] = {0};
     // 从客户端读取数据，读取的字节数存储在bytesRead中
@@ -518,9 +521,12 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
     
     // 将接收到的数据转换为字符串
     std::string requestStr(buffer, bytesRead);
+
+    Log::getInstance()->write(getFormattedDate()+" "+getClientIP(clientAddress)+" "+requestStr);
+
     // 解析HTTP请求
     Request request = parseRequest(requestStr);
-    
+
     // 创建响应对象
     Response response;
     
@@ -539,28 +545,25 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
             } catch (const std::exception& e) {
                 // 捕获异常并返回500错误
                 response.statusCode = 500;
-                response.json(R"({"error":"Internal server error: )" + std::string(e.what()) + "\"}");
+                response.error(500,"error: " + std::string(e.what()));
             }
         } else {
             // 如果未找到处理器，返回404错误
             response.statusCode = 404;
-            response.json(R"({"error":"Not found"})");
+            response.error(404, "Resource not found");
         }
     }
-
-
     
     // 构建响应字符串并发送给客户端
     std::string responseStr = buildResponse(response);
     send(clientSocket, responseStr.c_str(), responseStr.length(), 0);
 
     // 打印访问日志（类似Apache/Nginx格式）
-// Print access log (similar to Apache/Nginx format)
     std::string clientIP = getClientIP(clientAddress);
     std::lock_guard<std::mutex> lock(logMutex_);
     std::cout << clientIP << " - - [" << getFormattedDate() << "] \"" 
               << request.method << " " << request.path;
-    if (!request.queryParams.empty()) {
+    if (!request.queryParams.empty()&&LogParams) {
         std::cout << "?";
         bool first = true;
         for (const auto& param : request.queryParams) {
@@ -570,7 +573,11 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
         }
     }
     std::cout << " HTTP/1.1\" " << response.statusCode << " " 
-              << response.body.length() << std::endl;
+              << response.body.length();
+
+    std::time_t end_time = std::time(nullptr);
+    long long end_timestamp = static_cast<long long>(end_time) * 1000;
+    std::cout << end_timestamp - timestamp << "ms" << std::endl;
 
     close(clientSocket);
 }
@@ -600,7 +607,7 @@ Request Server::parseRequest(const std::string& requestStr) {
             // 解析查询参数
             request.path = request.path.substr(0, queryPos);
         }
-            // 更新路径为不包含查询参数的部分
+        // 更新路径为不包含查询参数的部分
     }
     
     // 解析头部和body

@@ -5,6 +5,7 @@
 #include "../include/JsonValue.h"
 #include <cstdio>
 #include <utility>
+#include <iostream>
 
 // ========== JsonValue 实现 ==========
 // ========== JsonValue Implementation ==========
@@ -148,3 +149,29 @@ std::string toJsonArray(const std::vector<std::map<std::string, std::string>>& v
     return value.toJson();
 }
 
+// 实现fromJson方法（注意：已移除const修饰符）
+void JsonValue::fromJson(const std::string& jsonStr) {
+    size_t pos = 0;
+    try {
+        // 递归解析整个JSON字符串，得到一个完整的JsonValue
+        JsonValue parsed = parseValue(jsonStr, pos);
+
+        // 检查解析是否完全（避免JSON字符串后有多余字符）
+        pos = skipWhitespace(jsonStr, pos);
+        if (pos < jsonStr.size()) {
+            throw std::invalid_argument("Unexpected characters after JSON value");
+        }
+
+        // 将解析结果赋值给当前对象
+        this->type_ = parsed.type_;
+        this->stringValue_ = std::move(parsed.stringValue_);
+        this->numberValue_ = parsed.numberValue_;
+        this->boolValue_ = parsed.boolValue_;
+        this->objectValue_ = std::move(parsed.objectValue_);
+        this->arrayValue_ = std::move(parsed.arrayValue_);
+    } catch (const std::exception& e) {
+        // 解析失败时，重置为null类型
+        this->type_ = NULL_TYPE;
+        throw std::runtime_error("JSON parse error: " + std::string(e.what()));
+    }
+}
