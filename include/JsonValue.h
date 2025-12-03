@@ -2,8 +2,8 @@
 // Created by HP on 2025/11/5.
 //
 
-#ifndef FLIGHTSERVER_JSONVALUE_H
-#define FLIGHTSERVER_JSONVALUE_H
+#ifndef CBSF_JSONVALUE_H
+#define CBSF_JSONVALUE_H
 
 #include <string>
 #include <map>
@@ -192,28 +192,6 @@ public:
      */
     static JsonValue array(const std::vector<JsonValue>& arr);
 
-private:
-    Type type_;                                    ///< 值的类型
-    std::string stringValue_;                     ///< 字符串值
-    double numberValue_;                          ///< 数字值
-    bool boolValue_;                              ///< 布尔值
-    std::map<std::string, JsonValue> objectValue_; ///< 对象值
-    std::vector<JsonValue> arrayValue_;           ///< 数组值
-
-    /**
-     * @brief 转义JSON字符串中的特殊字符
-     * @param str 原始字符串
-     * @return 转义后的字符串
-     */
-    [[nodiscard]] static std::string escapeJsonString(const std::string& str) ;
-
-    static size_t skipWhitespace(const std::string& jsonStr, size_t pos) {
-        while (pos < jsonStr.size() && std::isspace(static_cast<unsigned char>(jsonStr[pos]))) {
-            pos++;
-        }
-        return pos;
-    }
-
 // 辅助函数：解析字符串（处理转义字符）
     static std::string parseString(const std::string& jsonStr, size_t& pos) {
         pos++; // 跳过开头的 "
@@ -245,6 +223,28 @@ private:
         }
         pos++; // 跳过结尾的 "
         return result;
+    }
+
+private:
+    Type type_;                                    ///< 值的类型
+    std::string stringValue_;                     ///< 字符串值
+    double numberValue_;                          ///< 数字值
+    bool boolValue_;                              ///< 布尔值
+    std::map<std::string, JsonValue> objectValue_; ///< 对象值
+    std::vector<JsonValue> arrayValue_;           ///< 数组值
+
+    /**
+     * @brief 转义JSON字符串中的特殊字符
+     * @param str 原始字符串
+     * @return 转义后的字符串
+     */
+    [[nodiscard]] static std::string escapeJsonString(const std::string& str) ;
+
+    static size_t skipWhitespace(const std::string& jsonStr, size_t pos) {
+        while (pos < jsonStr.size() && std::isspace(static_cast<unsigned char>(jsonStr[pos]))) {
+            pos++;
+        }
+        return pos;
     }
 
 // 辅助函数：解析数字
@@ -411,5 +411,5 @@ std::string toJson(const std::map<std::string, JsonValue>& obj);
  */
 std::string toJsonArray(const std::vector<std::map<std::string, std::string>>& vec);
 
-#endif //FLIGHTSERVER_JSONVALUE_H
+#endif //CBSF_JSONVALUE_H
 

@@ -2,8 +2,8 @@
 // Created by HP on 2025/11/19.
 // Log class header file
 
-#ifndef FLIGHTSERVER_LOG_H
-#define FLIGHTSERVER_LOG_H
+#ifndef CBSF_LOG_H
+#define CBSF_LOG_H
 
 #include <string>
 
@@ -11,7 +11,7 @@
 // Log class, designed with singleton pattern
 class Log {
     std::string path = "../log.log";  // 日志文件路径 (Log file path)
-    FILE *fp;  // 文件指针 (File pointer)
+    FILE *fp{};  // 文件指针 (File pointer)
     static Log *instance;  // 单例实例指针 (Singleton instance pointer)
     // 构造函数 - 私有，防止外部创建实例
     // Constructor - Private, prevent external instance creation
@@ -30,4 +30,4 @@ public:
     static Log *getInstance();
 };
 
-#endif //FLIGHTSERVER_LOG_H
+#endif //CBSF_LOG_H

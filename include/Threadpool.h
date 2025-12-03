@@ -2,8 +2,8 @@
 // Created by HP on 2025/11/5.
 //
 
-#ifndef FLIGHTSERVER_THREADPOOL_H
-#define FLIGHTSERVER_THREADPOOL_H
+#ifndef CBSF_THREADPOOL_H
+#define CBSF_THREADPOOL_H
 
 #include <thread>
 #include <vector>
@@ -74,4 +74,4 @@ public:
 };
 
 
-#endif //FLIGHTSERVER_THREADPOOL_H
+#endif //CBSF_THREADPOOL_H

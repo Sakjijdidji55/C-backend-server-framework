@@ -2,8 +2,8 @@
 // Created by HP on 2025/11/13.
 //
 
-#ifndef FLIGHTSERVER_JWT_H
-#define FLIGHTSERVER_JWT_H
+#ifndef CBSF_JWT_H
+#define CBSF_JWT_H
 #include <string>
 #include <vector>
 #include <stdexcept>
@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <random>
+#include "JsonValue.h"
 
 // JWT类，用于生成和验证JSON Web Token
 // JWT class for generating and verifying JSON Web Tokens
@@ -100,21 +101,23 @@ private:
     static std::vector<uint8_t> hmac_sha256(const std::vector<uint8_t>& key,const std::vector<uint8_t>& data) ;
 
     // 生成随机盐值（16字节，足够安全）
-    static std::vector<uint8_t> generate_salt() ;
+    static std::string generate_salt() ;
 
     // 字节转十六进制字符串（便于存储）
-    static std::string bytes_to_hex(const std::vector<uint8_t>& bytes);
+    static std::string bytes_to_hex(const std::string & bytes);
 
     // 补充：十六进制字符串转字节数组（解析盐值和哈希时需要）
-    static std::vector<uint8_t> hex_to_bytes(const std::string& hex) ;
+    static std::string hex_to_bytes(const std::string& hex) ;
 
     // 常量时间比较（防时序攻击）：无论内容是否相同，比较时间一致
-    static bool constant_time_compare(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) ;
+    static bool constant_time_compare(const std::string & a, const std::string & b) ;
 
     std::string secret_;
     Algorithm algorithm_;
-    long long defaultTTL_;
+    long long defaultTTL_ = 60 * 24 * 7;
     static JWT* instance_;
+
+    static std::string getStringFromJsonValue(const JsonValue &value, const std::string &key);
 };
 
-#endif //FLIGHTSERVER_JWT_H
+#endif //CBSF_JWT_H

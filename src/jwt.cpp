@@ -3,6 +3,7 @@
 //
 
 #include "../include/jwt.h"
+#include "JsonValue.h"
 //#include "../include/config.h"
 
 #include <array>
@@ -31,9 +32,7 @@ constexpr std::array<std::uint32_t, 64> kSha256Constants{
         0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
-inline std::uint32_t rotr(std::uint32_t value, std::uint32_t count) {
-    return (value >> count) | (value << (32 - count));
-}
+
 
 } // namespace
 
@@ -44,11 +43,10 @@ JWT* JWT::instance_ = nullptr;
  *
  * 该构造函数用于创建JWT对象，设置默认算法为HS256，默认生存时间(TTL)为3600秒。
  * 它会检查是否已经存在JWT实例，如果存在则输出错误信息。
- * 同时，如果配置存在，会尝试从配置中加载JWT的过期时间和RSA私钥路径。
  *
  * @note 这是一个单例模式的实现，确保系统中只有一个JWT实例
  */
-JWT::JWT(const std::string& expiresIn, const std::string& jwtRsaPrivateKeyPath) : algorithm_(Algorithm::HS256), defaultTTL_(3600) {
+JWT::JWT(const std::string& expiresIn, const std::string& jwtPrivateKeyPath) : algorithm_(Algorithm::HS256), defaultTTL_(3600) {
     // 检查是否已存在JWT实例，如果存在则输出错误信息
     // Check if JWT instance already exists, output error message if it does
     if (instance_ != nullptr) {
@@ -62,8 +60,8 @@ JWT::JWT(const std::string& expiresIn, const std::string& jwtRsaPrivateKeyPath) 
         }
     }
 
-    if (!jwtRsaPrivateKeyPath.empty()) {
-        loadSecretFromFile(jwtRsaPrivateKeyPath);
+    if (!jwtPrivateKeyPath.empty()) {
+        loadSecretFromFile(jwtPrivateKeyPath);
     }
     instance_ = this;
 }
@@ -75,13 +73,37 @@ JWT::JWT(std::string secret, long long ttlSeconds)
     }
 }
 
+/**
+ * 设置JWT的密钥
+ * @param secret 要设置的密钥字符串
+ * @throws std::invalid_argument 当传入的密钥为空时抛出异常
+ */
 void JWT::setSecret(const std::string& secret) {
+    // 检查密钥是否为空
     if (secret.empty()) {
+        // 如果密钥为空，抛出无效参数异常
         throw std::invalid_argument("JWT secret must not be empty");
     }
+    // 将传入的密钥保存到成员变量中
     secret_ = secret;
 }
 
+/**
+ * 循环右移函数（Rotor函数）
+ * 将一个32位无符号整数循环右指定位数
+ * @param value 要进行循环右移的32位无符号整数值
+ * @param count 循环右移的位数，范围应在0到31之间
+ * @return 返回循环右移后的32位无符号整数值
+ *
+ * 该函数通过将值右移指定位数，并将剩余高位部分左移相应位数，
+ * 然后通过按位或操作组合这两个部分，实现循环右移效果。
+ * 例如：rotor(0b1100, 2) 将返回 0b0011
+ */
+inline std::uint32_t rotor(std::uint32_t value, std::uint32_t count) {
+    // 右移count位，并将左移(32-count)位后的结果进行按位或操作
+    // 实现循环右移效果
+    return (value >> count) | (value << (32 - count));
+}
 /**
  * 从文件中加载密钥
  * @param path 密钥文件的路径
@@ -230,6 +252,21 @@ std::optional<std::map<std::string, std::string>> JWT::parseClaims(const std::st
 
 JWT::Algorithm JWT::algorithm() const {
     return algorithm_;
+}
+
+/**
+ * 构建JWT头部信息
+ * @return 返回包含算法和类型的标准JWT头部字符串
+ *
+ * 该函数返回一个固定的JWT头部字符串，使用HS256算法作为签名算法，
+ * 并指定令牌类型为JWT(JSON Web Token)
+ */
+std::string JWT::buildHeader() {
+    // 使用静态常量存储标准JWT头部字符串
+    // 内容为JSON格式，包含算法(alg)和类型(typ)字段
+    static const std::string header = R"({"alg":"HS256","typ":"JWT"})";
+    // 返回预定义的JWT头部
+    return header;
 }
 
 /**
@@ -395,8 +432,8 @@ std::string JWT::sha256(const std::string& data) {
 
         // 扩展16个字为64个字
         for (int i = 16; i < 64; ++i) {
-            std::uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
-            std::uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            std::uint32_t s0 = rotor(w[i - 15], 7) ^ rotor(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            std::uint32_t s1 = rotor(w[i - 2], 17) ^ rotor(w[i - 2], 19) ^ (w[i - 2] >> 10);
             w[i] = w[i - 16] + s0 + w[i - 7] + s1;
         }
 
@@ -412,10 +449,10 @@ std::string JWT::sha256(const std::string& data) {
 
         // 主压缩函数循环
         for (int i = 0; i < 64; ++i) {
-            std::uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            std::uint32_t s1 = rotor(e, 6) ^ rotor(e, 11) ^ rotor(e, 25);
             std::uint32_t ch = (e & f) ^ ((~e) & g);
             std::uint32_t temp1 = h + s1 + ch + kSha256Constants[i] + w[i];
-            std::uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            std::uint32_t s0 = rotor(a, 2) ^ rotor(a, 13) ^ rotor(a, 22);
             std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
             std::uint32_t temp2 = s0 + maj;
 
@@ -491,21 +528,6 @@ std::string JWT::hmacSha256(const std::string& data, const std::string& key) {
 }
 
 /**
- * 构建JWT头部信息
- * @return 返回包含算法和类型的标准JWT头部字符串
- *
- * 该函数返回一个固定的JWT头部字符串，使用HS256算法作为签名算法，
- * 并指定令牌类型为JWT(JSON Web Token)
- */
-std::string JWT::buildHeader() {
-    // 使用静态常量存储标准JWT头部字符串
-    // 内容为JSON格式，包含算法(alg)和类型(typ)字段
-    static const std::string header = R"({"alg":"HS256","typ":"JWT"})";
-    // 返回预定义的JWT头部
-    return header;
-}
-
-/**
  * 对输入的字符串进行JSON转义处理
  * @param input 需要转义的原始字符串
  * @return 转义后的字符串，确保可以安全地在JSON格式中使用
@@ -543,33 +565,32 @@ std::string JWT::escapeJson(const std::string& input) {
 }
 
 /**
- * 构建JWT的payload部分
- * @param customClaims 自定义声明键值对集合
- * @param issuedAt 签发时间(Unix时间戳)
- * @param expiresAt 过期时间(Unix时间戳)，可选参数
- * @return 返回格式化的JSON字符串作为JWT的payload
+ * @brief 构建JWT的payload部分（使用JsonValue优化）
+ * 先构造JsonValue对象，再序列化为JSON字符串，避免手动拼接错误
  */
 std::string JWT::buildPayload(const std::map<std::string, std::string>& customClaims,
-                              long long issuedAt,  // 签发时间(Unix时间戳)
-                              std::optional<long long> expiresAt) {  // 过期时间(Unix时间戳)，可选
-    // 使用字符串流构建JSON
-    std::ostringstream oss;
-    oss << "{";  // 开始JSON对象
-    // 添加签发时间(iat)字段
-    oss << "\"iat\":" << issuedAt;
-    // 如果提供了过期时间，添加过期时间(exp)字段
+                              long long issuedAt,
+                              std::optional<long long> expiresAt) {
+    // 第一步：构造JsonValue对象（JSON对象类型）
+    std::map<std::string, JsonValue> payloadMap;
+
+    // 添加标准声明：iat（签发时间）
+    payloadMap.emplace("iat", JsonValue(static_cast<double>(issuedAt)));
+
+    // 添加可选标准声明：exp（过期时间）
     if (expiresAt.has_value()) {
-        oss << ",\"exp\":" << expiresAt.value();
+        payloadMap.emplace("exp", JsonValue(static_cast<double>(expiresAt.value())));
     }
 
-    // 遍历自定义声明集合，添加到JSON中
+    // 添加自定义声明（自动处理字符串转义）
     for (const auto& [key, value] : customClaims) {
-        // 对键和值进行JSON转义后添加到JSON字符串中
-        oss << ",\"" << escapeJson(key) << "\":\"" << escapeJson(value) << "\"";
+        // 直接使用JsonValue的字符串构造，转义逻辑由JsonValue::escapeJsonString自动处理
+        payloadMap.emplace(key, JsonValue(value));
     }
 
-    oss << "}";  // 结束JSON对象
-    return oss.str();  // 返回构建完成的JSON字符串
+    // 第二步：使用JsonValue序列化为标准JSON字符串
+    JsonValue payloadValue(payloadMap);
+    return payloadValue.toJson();
 }
 
 /**
@@ -698,247 +719,77 @@ long long JWT::parseTTL(const std::string& ttlSpec) {
 }
 
 /**
- * @brief 解析JSON对象字符串为键值对映射
- *
- * 此函数将JSON格式的字符串解析为std::map<std::string, std::string>，
- * 支持字符串类型的键值对，处理转义字符，并进行基本的错误检查。
- *
- * @param json 输入的JSON格式字符串
- * @return std::map<std::string, std::string> 解析后的键值对映射
- * @throws std::runtime_error 当JSON格式无效时抛出异常
+ * @brief 解析JSON对象字符串为键值对映射（使用JsonValue优化）
+ * 利用JsonValue的完整解析能力，自动处理转义字符、嵌套检查、语法验证
  */
 std::map<std::string, std::string> JWT::parseJsonObject(const std::string& json) {
-    // 存储解析结果的键值对映射
     std::map<std::string, std::string> result;
-    // 字符串解析的当前位置索引
-    std::size_t i = 0;
+    JsonValue jsonValue;
 
-    // 定义一个lambda函数用于跳过空白字符
-    auto skipWhitespace = [&](std::size_t& idx) {
-        while (idx < json.size() && std::isspace(static_cast<unsigned char>(json[idx]))) {
-            ++idx;
-        }
-    };
-
-    // 跳过开头空白并检查是否为对象开始标记'{'
-    skipWhitespace(i);
-    if (i >= json.size() || json[i] != '{') {
-        throw std::runtime_error("Invalid JSON object: missing '{'");
+    try {
+        jsonValue.fromJson(json);
+    } catch (const std::exception& e) {
+        throw std::runtime_error("JSON parse failed: " + std::string(e.what()));
     }
-    ++i;
 
-    // 循环解析JSON对象的键值对
-    while (true) {
-        // 跳过空白并检查当前位置
-        skipWhitespace(i);
-        if (i >= json.size()) {
-            throw std::runtime_error("Invalid JSON object: unexpected end");
-        }
-        // 检查是否到达对象结束
-        if (json[i] == '}') {
-            ++i;
-            break;
-        }
-        // 检查键是否以双引号开始
-        if (json[i] != '"') {
-            throw std::runtime_error("Invalid JSON object: expected string key");
-        }
-        ++i;
-        // 解析键
-        std::string key;
-        while (i < json.size()) {
-            char ch = json[i++];
-            if (ch == '\\') {
-                // 处理转义字符
-                if (i >= json.size()) {
-                    throw std::runtime_error("Invalid JSON object: bad escape in key");
-                }
-                char esc = json[i++];
-                switch (esc) {
-                    case '"': key.push_back('"'); break;
-                    case '\\': key.push_back('\\'); break;
-                    case '/': key.push_back('/'); break;
-                    case 'b': key.push_back('\b'); break;
-                    case 'f': key.push_back('\f'); break;
-                    case 'n': key.push_back('\n'); break;
-                    case 'r': key.push_back('\r'); break;
-                    case 't': key.push_back('\t'); break;
-                    case 'u': {
-                        // 处理Unicode转义序列
-                        if (i + 4 > json.size()) {
-                            throw std::runtime_error("Invalid JSON object: bad unicode escape");
-                        }
-                        std::string hex = json.substr(i, 4);
-                        i += 4;
-                        auto code = static_cast<char16_t>(std::stoi(hex, nullptr, 16));
-                        if (code <= 0x7F) {
-                            key.push_back(static_cast<char>(code));
-                        } else if (code <= 0x7FF) {
-                            key.push_back(static_cast<char>(0xC0 | ((code >> 6) & 0x1F)));
-                            key.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-                        } else {
-                            key.push_back(static_cast<char>(0xE0 | ((code >> 12) & 0x0F)));
-                            key.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
-                            key.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-                        }
-                        break;
-                    }
-                    default:
-                        throw std::runtime_error("Invalid JSON object: unsupported escape in key");
-                }
-            } else if (ch == '"') {
-                // 键结束
+    // 第二步：检查解析结果是否为JSON对象类型
+    if (jsonValue.getType() != JsonValue::OBJECT) {
+        throw std::runtime_error("Invalid JSON: not an object");
+    }
+
+    // 第三步：提取对象中的所有键值对，转换为string-string映射
+    auto jsonObject = jsonValue.asObject();
+    for (const auto& [key, value] : jsonObject) {
+        // 提取值并确保为string类型（非string类型会自动转为对应字符串形式）
+        switch (value.getType()) {
+            case JsonValue::STRING:
+                result.emplace(key, value.asString());
                 break;
-            } else {
-                // 普通字符
-                key.push_back(ch);
-            }
+            case JsonValue::NUMBER:
+                // 数字类型转为string（保持原始数值格式）
+                result.emplace(key, value.toJson());
+                break;
+            case JsonValue::BOOLEAN:
+                // 布尔类型转为"true"/"false"字符串
+                result.emplace(key, value.toJson());
+                break;
+            case JsonValue::NULL_TYPE:
+                // null类型转为"null"字符串
+                result.emplace(key, "null");
+                break;
+            default:
+                // 不支持对象/数组作为值（如需支持可扩展）
+                throw std::runtime_error("Unsupported value type for key: " + key);
         }
-
-        // 检查键值分隔符':'
-        skipWhitespace(i);
-        if (i >= json.size() || json[i] != ':') {
-            throw std::runtime_error("Invalid JSON object: expected ':'");
-        }
-        ++i;
-
-        // 跳过空白字符准备解析值
-        skipWhitespace(i);
-        if (i >= json.size()) {
-            throw std::runtime_error("Invalid JSON object: missing value");
-        }
-
-        // 解析值
-        std::string value;
-        if (json[i] == '"') {
-            // 字符串类型的值
-            ++i;
-            std::string raw;
-            while (i < json.size()) {
-                char ch = json[i++];
-                if (ch == '\\') {
-                    // 处理值中的转义字符
-                    if (i >= json.size()) {
-                        throw std::runtime_error("Invalid JSON object: bad escape in value");
-                    }
-                    char esc = json[i++];
-                    raw.push_back('\\');
-                    raw.push_back(esc);
-                } else if (ch == '"') {
-                    // 值结束
-                    break;
-                } else {
-                    // 普通字符
-                    raw.push_back(ch);
-                }
-            }
-            value = unescapeJson(raw);
-        } else {
-            // 非字符串类型的值
-            std::size_t start = i;
-            while (i < json.size() && json[i] != ',' && json[i] != '}') {
-                ++i;
-            }
-            value = json.substr(start, i - start);
-            // 移除值末尾的空白字符
-            std::size_t endpos = value.find_last_not_of(" \t\n\r");
-            if (endpos == std::string::npos) {
-                value.clear();
-            } else {
-                value.erase(endpos + 1);
-            }
-        }
-
-        // 将解析的键值对添加到结果中
-        result.emplace(std::move(key), std::move(value));
-
-        // 检查是否还有更多键值对
-        skipWhitespace(i);
-        if (i >= json.size()) {
-            throw std::runtime_error("Invalid JSON object: unexpected end after value");
-        }
-        if (json[i] == ',') {
-            // 还有更多键值对
-            ++i;
-            continue;
-        }
-        if (json[i] == '}') {
-            // 对象结束
-            ++i;
-            break;
-        }
-        throw std::runtime_error("Invalid JSON object: expected ',' or '}'");
-    }
-
-    // 检查是否还有未处理的字符
-    skipWhitespace(i);
-    if (i != json.size()) {
-        throw std::runtime_error("Invalid JSON object: trailing characters");
     }
 
     return result;
 }
 
+
 /**
- * @brief 对经过JSON转义的字符串进行反转义处理
- * @param input 已经经过JSON转义的输入字符串
- * @return 返回反转义后的原始字符串
- * @throws std::runtime_error 当遇到无效的转义序列或Unicode转义时抛出异常
+ * @brief JSON字符串反转义（复用JsonValue的parseString逻辑）
  */
 std::string JWT::unescapeJson(const std::string& input) {
-    std::string output;  // 用于存储反转义后的结果字符串
-    output.reserve(input.size());  // 预分配足够的内存空间以提高性能
-    // 遍历输入字符串的每个字符
-    for (std::size_t i = 0; i < input.size();) {
-        char ch = input[i++];
-        // 如果不是转义字符，直接添加到输出结果中
-        if (ch != '\\') {
-            output.push_back(ch);
-            continue;
-        }
-        // 检查是否到达字符串末尾，避免越界访问
-        if (i >= input.size()) {
-            throw std::runtime_error("Invalid escape sequence");
-        }
-        char esc = input[i++];  // 获取转义字符
-        // 根据不同的转义字符进行处理
-        switch (esc) {
-            case '"': output.push_back('"'); break;  // 双引号
-            case '\\': output.push_back('\\'); break;  // 反斜杠
-            case '/': output.push_back('/'); break;  // 正斜杠
-            case 'b': output.push_back('\b'); break;  // 退格
-            case 'f': output.push_back('\f'); break;  // 换页
-            case 'n': output.push_back('\n'); break;  // 换行
-            case 'r': output.push_back('\r'); break;  // 回车
-            case 't': output.push_back('\t'); break;  // 制表符
-            case 'u': {  // Unicode转义序列处理
-                // 检查是否有足够的字符用于Unicode转义
-                if (i + 4 > input.size()) {
-                    throw std::runtime_error("Invalid unicode escape");
-                }
-                // 提取4位十六进制数字
-                std::string hex = input.substr(i, 4);
-                i += 4;
-                // 将十六进制字符串转换为字符码
-                auto code = static_cast<char16_t>(std::stoi(hex, nullptr, 16));
-                // 根据Unicode码点范围进行UTF-8编码
-                if (code <= 0x7F) {
-                    output.push_back(static_cast<char>(code));
-                } else if (code <= 0x7FF) {
-                    output.push_back(static_cast<char>(0xC0 | ((code >> 6) & 0x1F)));
-                    output.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-                } else {
-                    output.push_back(static_cast<char>(0xE0 | ((code >> 12) & 0x0F)));
-                    output.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
-                    output.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-                }
-                break;
-            }
-            default:
-                throw std::runtime_error("Invalid escape sequence");
-        }
+    // 构造完整的JSON字符串（包裹双引号，符合parseString的输入要求）
+    std::string jsonString = "\"" + input + "\"";
+    size_t pos = 0;
+
+    try {
+        return JsonValue::parseString(jsonString, pos);
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Unescape JSON failed: " + std::string(e.what()));
     }
-    return output;
+}
+
+/**
+ * @brief 辅助函数：从JsonValue提取string值（含类型检查）
+ */
+std::string JWT::getStringFromJsonValue(const JsonValue& value, const std::string& key) {
+    if (value.getType() != JsonValue::STRING) {
+        throw std::runtime_error("Key '" + key + "' is not a string type");
+    }
+    return value.asString();
 }
 
 /**
@@ -948,24 +799,23 @@ std::string JWT::unescapeJson(const std::string& input) {
      */
 std::string JWT::encrypt_password(const std::string& password) {
     const size_t iterations = 100000; // 迭代次数（可根据性能调整）
-    std::vector<uint8_t> salt = generate_salt();
-    std::vector<uint8_t> password_bytes(password.begin(), password.end());
+    std::string salt = generate_salt();
 
     // PBKDF2核心：多次迭代HMAC-SHA256
-    std::vector<uint8_t> dk(32); // 输出32字节哈希
-    std::vector<uint8_t> U, T(32, 0);
+    std::string dk(32, 0x00); // 输出32字节哈希
+    std::string U, T(32, 0);
     for (size_t i = 1; i <= 1; ++i) { // 只需要1个块（32字节）
         // 盐值 + 4字节大端序号（i=1）
-        std::vector<uint8_t> salt_i = salt;
-        salt_i.push_back((i >> 24) & 0xFF);
-        salt_i.push_back((i >> 16) & 0xFF);
-        salt_i.push_back((i >> 8) & 0xFF);
-        salt_i.push_back(i & 0xFF);
+        std::string salt_i = salt;
+        salt_i.push_back(static_cast<char>((i >> 24) & 0xFF));
+        salt_i.push_back(static_cast<char>((i >> 16) & 0xFF));
+        salt_i.push_back(static_cast<char>((i >> 8) & 0xFF));
+        salt_i.push_back(static_cast<char>(i & 0xFF));
 
-        U = hmac_sha256(password_bytes, salt_i);
+        U = hmacSha256(password, salt_i);
         T = U;
         for (size_t j = 1; j < iterations; ++j) {
-            U = hmac_sha256(password_bytes, U);
+            U = hmacSha256(password, U);
             for (size_t k = 0; k < 32; ++k) {
                 T[k] ^= U[k]; // 异或累积
             }
@@ -976,49 +826,37 @@ std::string JWT::encrypt_password(const std::string& password) {
     return bytes_to_hex(salt) + ":" + std::to_string(iterations) + ":" + bytes_to_hex(dk);
 }
 
-// HMAC-SHA256实现（基于sha256_bytes）
-std::vector<uint8_t> JWT::hmac_sha256(
-        const std::vector<uint8_t>& key,
-        const std::vector<uint8_t>& data
-) {
-    std::vector<uint8_t> key_padded(64, 0x00);
-    if (key.size() > 64) {
-        key_padded = sha256_bytes(key); // 密钥过长时先哈希
-    } else {
-        memcpy(key_padded.data(), key.data(), key.size());
+/**
+ * @brief 生成加密安全的盐值
+ * 生成 16 字节（128 位）加密安全随机数，编码为 32 字符十六进制字符串
+ * 满足密码学安全要求，跨平台兼容，生成的盐值可直接存储/传输
+ */
+std::string JWT::generate_salt() {
+    const size_t salt_length = 16; // 16 字节 = 128 位，足够密码学安全
+    std::string salt_bytes(salt_length, 0x00);
+
+    try {
+        // 1. 初始化加密安全随机数生成器
+        std::random_device rd;
+        // 双重种子：random_device + 当前时间戳，增强随机性（应对 rd 伪随机的情况）
+        uint64_t seed = rd() ^ static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        std::mt19937_64 gen(seed); // 64 位 Mersenne Twister 生成器，适合加密场景
+        std::uniform_int_distribution<uint8_t> dist(0x00, 0xFF); // 生成 0-255 的均匀分布随机字节
+
+        // 2. 生成 16 字节随机数据
+        for (auto& byte : salt_bytes) {
+            byte = dist(gen);
+        }
+
+        // 3. 转为十六进制字符串（可打印、易存储）
+        return bytes_to_hex(salt_bytes);
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to generate salt: " + std::string(e.what()));
     }
-
-    std::vector<uint8_t> ipad(64), opad(64);
-    for (int i = 0; i < 64; ++i) {
-        ipad[i] = key_padded[i] ^ 0x36;
-        opad[i] = key_padded[i] ^ 0x5c;
-    }
-
-    // 计算内部哈希：HMAC(key ^ ipad, data)
-    std::vector<uint8_t> inner_data = ipad;
-    inner_data.insert(inner_data.end(), data.begin(), data.end());
-    std::vector<uint8_t> inner_hash = sha256_bytes(inner_data);
-
-    // 计算外部哈希：HMAC(key ^ opad, inner_hash)
-    std::vector<uint8_t> outer_data = opad;
-    outer_data.insert(outer_data.end(), inner_hash.begin(), inner_hash.end());
-    return sha256_bytes(outer_data);
-}
-
-// 生成随机盐值（16字节，足够安全）
-std::vector<uint8_t> JWT::generate_salt() {
-    std::vector<uint8_t> salt(16);
-    // 使用加密安全的随机数生成器（跨平台实现需调整）
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    for (auto& b : salt) {
-        b = static_cast<uint8_t>(gen() % 256);
-    }
-    return salt;
 }
 
 // 字节转十六进制字符串（便于存储）
-std::string JWT::bytes_to_hex(const std::vector<uint8_t>& bytes) {
+std::string JWT::bytes_to_hex(const std::string & bytes) {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
     for (uint8_t b : bytes) {
@@ -1034,104 +872,9 @@ JWT *JWT::getInstance() {
     return instance_;
 }
 
-std::vector<uint8_t> JWT::sha256_bytes(const std::vector<uint8_t> &data) {
-    // 初始化SHA256哈希值的初始常量
-    std::array<std::uint32_t, 8> hash{
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-    };
-
-    // 将输入字符串转换为字节数组
-    std::vector<std::uint8_t> message(data.begin(), data.end());
-    // 记录原始数据的比特长度
-    const std::uint64_t originalBitLength = static_cast<std::uint64_t>(message.size()) * 8;
-
-    // 添加填充位1
-    message.push_back(0x80);
-    // 添加填充位0，直到消息长度满足模64等于56
-    while ((message.size() % 64) != 56) {
-        message.push_back(0x00);
-    }
-
-    // 添加原始消息长度信息（64位大端序）
-    for (int i = 7; i >= 0; --i) {
-        message.push_back(static_cast<std::uint8_t>((originalBitLength >> (i * 8)) & 0xFF));
-    }
-
-    // 处理消息的每个512位（64字节）的块
-    for (std::size_t offset = 0; offset < message.size(); offset += 64) {
-        std::uint32_t w[64];
-
-        // 将当前64字节的块分解为16个32位字
-        for (int i = 0; i < 16; ++i) {
-            w[i] = (static_cast<std::uint32_t>(message[offset + 4 * i]) << 24) |
-                   (static_cast<std::uint32_t>(message[offset + 4 * i + 1]) << 16) |
-                   (static_cast<std::uint32_t>(message[offset + 4 * i + 2]) << 8) |
-                   (static_cast<std::uint32_t>(message[offset + 4 * i + 3]));
-        }
-
-        // 扩展16个字为64个字
-        for (int i = 16; i < 64; ++i) {
-            std::uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
-            std::uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-        }
-
-        // 初始化哈希值的工作变量
-        std::uint32_t a = hash[0];
-        std::uint32_t b = hash[1];
-        std::uint32_t c = hash[2];
-        std::uint32_t d = hash[3];
-        std::uint32_t e = hash[4];
-        std::uint32_t f = hash[5];
-        std::uint32_t g = hash[6];
-        std::uint32_t h = hash[7];
-
-        // 主压缩函数循环
-        for (int i = 0; i < 64; ++i) {
-            std::uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-            std::uint32_t ch = (e & f) ^ ((~e) & g);
-            std::uint32_t temp1 = h + s1 + ch + kSha256Constants[i] + w[i];
-            std::uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-            std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-            std::uint32_t temp2 = s0 + maj;
-
-            // 更新工作变量
-            h = g;
-            g = f;
-            f = e;
-            e = d + temp1;
-            d = c;
-            c = b;
-            b = a;
-            a = temp1 + temp2;
-        }
-
-        // 更新哈希值
-        hash[0] += a;
-        hash[1] += b;
-        hash[2] += c;
-        hash[3] += d;
-        hash[4] += e;
-        hash[5] += f;
-        hash[6] += g;
-        hash[7] += h;
-    }
-
-    // 将最终的哈希值转换为32字节的字符串
-    std::vector<uint8_t> result;
-    result.reserve(32);
-    for (std::uint32_t part : hash) {
-        for (int shift = 24; shift >= 0; shift -= 8) {
-            result.push_back(static_cast<char>((part >> shift) & 0xFF));
-        }
-    }
-    return result;
-}
-
 // 补充：十六进制字符串转字节数组（解析盐值和哈希时需要）
-std::vector<uint8_t> JWT::hex_to_bytes(const std::string& hex) {
-    std::vector<uint8_t> bytes;
+std::string JWT::hex_to_bytes(const std::string& hex) {
+    std::string bytes;
     if (hex.size() % 2 != 0) {
         return bytes; // 无效的十六进制字符串（长度为奇数）
     }
@@ -1139,14 +882,14 @@ std::vector<uint8_t> JWT::hex_to_bytes(const std::string& hex) {
     for (size_t i = 0; i < hex.size(); i += 2) {
         // 解析每两个字符为一个字节（16进制）
         std::string byte_str = hex.substr(i, 2);
-        auto byte = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
+        auto byte = static_cast<char>(std::stoul(byte_str, nullptr, 16));
         bytes.push_back(byte);
     }
     return bytes;
 }
 
 // 常量时间比较（防时序攻击）：无论内容是否相同，比较时间一致
-bool JWT::constant_time_compare(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+bool JWT::constant_time_compare(const std::string & a, const std::string & b) {
     if (a.size() != b.size()) {
         std::cout<<"长度不同"<<std::endl;
         return false; // 长度不同直接返回false
@@ -1180,8 +923,8 @@ bool JWT::verify_password(const std::string& password, const std::string& stored
     std::string stored_hash_hex = stored_hash.substr(colon2 + 1);
 
     // 2. 转换盐值和存储的哈希为字节数组
-    std::vector<uint8_t> salt = hex_to_bytes(salt_hex);
-    std::vector<uint8_t> expected_hash = hex_to_bytes(stored_hash_hex);
+    std::string salt = hex_to_bytes(salt_hex);
+    std::string expected_hash = hex_to_bytes(stored_hash_hex);
     if (salt.empty() || expected_hash.empty()) {
         std::cout<<"无效的十六进制"<<std::endl;
         return false; // 解析失败（无效的十六进制）
@@ -1201,23 +944,22 @@ bool JWT::verify_password(const std::string& password, const std::string& stored
     }
 
     // 4. 用相同的盐值和迭代次数重新计算哈希
-    std::vector<uint8_t> password_bytes(password.begin(), password.end());
-    std::vector<uint8_t> computed_hash(32); // 输出32字节（SHA-256长度）
+    std::string computed_hash(32, 0x00); // 输出32字节（SHA-256长度）
 
     // 复用PBKDF2-HMAC-SHA256逻辑（与加密时一致）
-    std::vector<uint8_t> U, T(32, 0);
+    std::string U, T(32, 0);
     for (size_t i = 1; i <= 1; ++i) { // 1个块（32字节）
-        std::vector<uint8_t> salt_i = salt;
+        std::string salt_i = salt;
         // 添加4字节大端序号（与加密时一致，i=1）
-        salt_i.push_back((i >> 24) & 0xFF);
-        salt_i.push_back((i >> 16) & 0xFF);
-        salt_i.push_back((i >> 8) & 0xFF);
-        salt_i.push_back(i & 0xFF);
+        salt_i.push_back(static_cast<char>((i >> 24) & 0xFF));
+        salt_i.push_back(static_cast<char>((i >> 16) & 0xFF));
+        salt_i.push_back(static_cast<char>((i >> 8) & 0xFF));
+        salt_i.push_back(static_cast<char>(i & 0xFF));
 
-        U = hmac_sha256(password_bytes, salt_i);
+        U = hmacSha256(password, salt_i);
         T = U;
         for (size_t j = 1; j < iterations; ++j) {
-            U = hmac_sha256(password_bytes, U);
+            U = hmacSha256(password, U);
             for (size_t k = 0; k < 32; ++k) {
                 T[k] ^= U[k];
             }
