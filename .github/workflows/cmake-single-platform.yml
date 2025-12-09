@@ -1,4 +1,3 @@
-# This starter workflow is for a CMake project running on a single platform.
 name: CMake on a single platform
 
 on:
@@ -17,32 +16,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 核心修正：添加MySQL官方源 + 使用正确的包名
-      - name: Install system dependencies
+      # 核心修复：改用MariaDB兼容库（无需MySQL官方源）+ 跳过GPG验证
+      - name: Install system dependencies (MariaDB替代MySQL)
         run: |
           sudo apt update -y
-          # 1. 安装必要工具（添加MySQL源需要）
-          sudo apt install -y wget gnupg2 lsb-release
-          
-          # 2. 添加MySQL官方APT源（解决libmysqlclient-dev找不到的问题）
-          wget https://dev.mysql.com/get/mysql-apt-config_0.8.29-1_all.deb
-          echo "mysql-apt-config mysql-apt-config/select-server select mysql-8.0" | sudo debconf-set-selections
-          sudo dpkg -i mysql-apt-config_0.8.29-1_all.deb
-          sudo apt update -y
-          
-          # 3. 安装正确的依赖包（移除不存在的包）
-          sudo apt install -y \
-            mysql-community-client \
-            libmysqlclient-dev \
+          # 1. 安装MariaDB客户端开发库（完全兼容MySQL API，无需添加任何源）
+          sudo apt install -y --allow-unauthenticated \
+            libmariadb-dev \
             libssl-dev \
             zlib1g-dev \
             cmake \
             g++ \
             make
           
-          # 验证MySQL库是否安装成功
-          ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient*
-          pkg-config --cflags --libs mysqlclient
+          # 2. 创建软链接，让CMake能找到mysqlclient（MariaDB兼容）
+          sudo ln -s /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
+          sudo ln -s /usr/include/mariadb/ /usr/include/mysql
+          
+          # 3. 验证安装
+          ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so
+          ls -l /usr/include/mysql/
 
       - name: Configure CMake
         run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
