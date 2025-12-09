@@ -1,3 +1,8 @@
+/**
+ * @file Server.h
+ * @brief 服务器核心类头文件
+ * @brief Server core class header file
+ */
 #ifndef SERVER_H
 #define SERVER_H
 
@@ -16,11 +21,11 @@
 
 
 #ifdef _WIN32
-#include <winsock2.h>    // Windows平台网络头文件
+#include <winsock2.h>    // Windows平台网络头文件 (Windows platform network header)
 #include <windows.h>
 #else
-#include <sys/socket.h>  // Linux/Unix平台网络头文件
-#include <netinet/in.h>  // 包含sockaddr_in定义
+#include <sys/socket.h>  // Linux/Unix平台网络头文件 (Linux/Unix platform network header)
+#include <netinet/in.h>  // 包含sockaddr_in定义 (Contains sockaddr_in definition)
 #include <arpa/inet.h>
 #endif
 
@@ -34,22 +39,37 @@ std::string getFormattedDate();
 
 #include "JsonValue.h"
 
-// 请求结构
-// Request structure
+/**
+ * @struct Request
+ * @brief HTTP请求结构体
+ * @brief HTTP request structure
+ */
 struct Request {
-    std::string method;
-    std::string path;
-    std::map<std::string, std::string> headers;
-    std::string body;
-    std::map<std::string, std::string> queryParams;  // 查询参数
-    std::map<std::string, JsonValue> bodyParams;   // 表单参数或JSON参数
-    std::unique_ptr<JsonValue> jsonBody;            // 解析后的JSON对象（如果适用）
+    std::string method;                      ///< HTTP方法 (HTTP method)
+    std::string path;                        ///< 请求路径 (Request path)
+    std::map<std::string, std::string> headers; ///< HTTP头部信息 (HTTP headers)
+    std::string body;                        ///< 请求体 (Request body)
+    std::map<std::string, std::string> queryParams;  ///< 查询参数 (Query parameters)
+    std::map<std::string, JsonValue> bodyParams;   ///< 表单参数或JSON参数 (Form or JSON parameters)
+    std::unique_ptr<JsonValue> jsonBody;            ///< 解析后的JSON对象（如果适用）(Parsed JSON object if applicable)
 
+    /**
+     * @brief 获取查询参数的值
+     * @param key 查询参数名
+     * @return 查询参数值，如果不存在则返回空字符串
+     * @brief Get the value of a query parameter
+     * @param key Query parameter name
+     * @return Query parameter value, or empty string if not exists
+     */
     [[nodiscard]] std::string query_param(const std::string& key) const {
         auto it = queryParams.find(key);
         return it != queryParams.end() ? it->second : "";
     }
 
+    /**
+     * @brief 显示请求的详细信息
+     * @brief Display detailed request information
+     */
     void show() const {
         std::cout << "Method: " + method + "\n";
         std::cout << "Path: " + path + "\n";
@@ -74,7 +94,8 @@ struct Request {
     }
 
     /**
-     * 解析请求体，根据Content-Type处理不同格式
+     * @brief 解析请求体，根据Content-Type处理不同格式
+     * @brief Parse request body, handle different formats based on Content-Type
      */
     void parseBody() {
         if (body.empty()) {
@@ -442,34 +463,63 @@ private:
         return ::tolower(*s1) - ::tolower(*s2);
     }
 };
-// 响应结构
-// Response structure
+
+/**
+ * @struct Response
+ * @brief HTTP响应结构体
+ * @brief HTTP response structure
+ */
 struct Response {
-    int statusCode = 200;
-    std::map<std::string, std::string> headers;
-    std::string body;
+    int statusCode = 200;                          ///< HTTP状态码 (HTTP status code)
+    std::map<std::string, std::string> headers; ///< HTTP响应头 (HTTP response headers)
+    std::string body;                              ///< 响应体 (Response body)
     
+    /**
+     * @brief 构造函数，初始化默认响应头
+     * @brief Constructor, initializes default response headers
+     */
     Response() {
         headers["Content-Type"] = "application/json; charset=utf-8";
     }
     
-    // 便捷方法：设置JSON响应
+    /**
+     * @brief 设置JSON响应
+     * @param jsonStr JSON格式的响应内容
+     * @brief Set JSON response
+     * @param jsonStr JSON formatted response content
+     */
     void json(const std::string& jsonStr) {
         body = jsonStr;
         headers["Content-Type"] = "application/json; charset=utf-8";
     }
     
-    // 便捷方法：设置文本响应
+    /**
+     * @brief 设置文本响应
+     * @param textStr 文本格式的响应内容
+     * @brief Set text response
+     * @param textStr Text formatted response content
+     */
     void text(const std::string& textStr) {
         body = textStr;
         headers["Content-Type"] = "text/plain; charset=utf-8";
     }
 
-    // 便捷方法：设置HTML响应
+    /**
+     * @brief 设置HTTP状态码
+     * @param code HTTP状态码
+     * @brief Set HTTP status code
+     * @param code HTTP status code
+     */
     void status(int code) {
         statusCode = code;
     }
 
+    /**
+     * @brief 设置成功响应（带状态和消息）
+     * @param resMap 要返回的数据映射
+     * @brief Set success response (with status and message)
+     * @param resMap Data map to return
+     */
     void success(const std::map<std::string, std::string>& resMap) {
         std::map<std::string, std::string> result=resMap;
         result["status"] = "ok";
@@ -500,63 +550,128 @@ struct Response {
     }
 };
 
-// 路由处理器类型
+/**
+ * @typedef Handler
+ * @brief 路由处理器函数类型
+ * @brief Route handler function type
+ */
 typedef std::function<void(const Request&, Response&)> Handler;
 
-// 简单的HTTP服务器类
-// Simple HTTP server class
+/**
+ * @class Server
+ * @brief 简单的HTTP服务器类
+ * @brief Simple HTTP server class
+ */
 class Server {
 public:
-    // 构造函数，初始化服务器端口
-    // Constructor, initialize server port
+    /**
+     * @brief 构造函数，初始化服务器端口
+     * @param port 服务器监听端口，默认8080
+     * @param printParams 是否打印请求参数
+     * @brief Constructor, initialize server port
+     * @param port Server listening port, default 8080
+     * @param printParams Whether to print request parameters
+     */
     explicit Server(int port = 8080, bool printParams = false);
-    // 析构函数
-    // Destructor
+    
+    /**
+     * @brief 析构函数，清理资源
+     * @brief Destructor, clean up resources
+     */
     ~Server();
     
-    // 注册路由 - GET方法
-    // Register route - GET method
+    /**
+     * @brief 注册GET方法路由
+     * @param path 路由路径
+     * @param handler 处理函数
+     * @brief Register GET method route
+     * @param path Route path
+     * @param handler Handler function
+     */
     void get(const std::string& path, Handler handler);
-    // 注册路由 - POST方法
-    // Register route - POST method
+    
+    /**
+     * @brief 注册POST方法路由
+     * @param path 路由路径
+     * @param handler 处理函数
+     * @brief Register POST method route
+     * @param path Route path
+     * @param handler Handler function
+     */
     void post(const std::string& path, Handler handler);
-    // 注册路由 - PUT方法
-    // Register route - PUT method
+    
+    /**
+     * @brief 注册PUT方法路由
+     * @param path 路由路径
+     * @param handler 处理函数
+     * @brief Register PUT method route
+     * @param path Route path
+     * @param handler Handler function
+     */
     void put(const std::string& path, Handler handler);
-    // 注册路由 - DELETE方法
-    // Register route - DELETE method
+    
+    /**
+     * @brief 注册DELETE方法路由
+     * @param path 路由路径
+     * @param handler 处理函数
+     * @brief Register DELETE method route
+     * @param path Route path
+     * @param handler Handler function
+     */
     void del(const std::string& path, Handler handler);
     
-    // 启动服务器
-    // Start server
+    /**
+     * @brief 启动服务器
+     * @brief Start server
+     */
     void run();
     
-    // 停止服务器
-    // Stop server
+    /**
+     * @brief 停止服务器
+     * @brief Stop server
+     */
     void stop();
 
-    // 获取服务器实例（单例模式）
-    // Get server instance (singleton pattern)
+    /**
+     * @brief 获取服务器实例（单例模式）
+     * @return Server* 服务器实例指针
+     * @brief Get server instance (singleton pattern)
+     * @return Server* Server instance pointer
+     */
     static Server* getInstance();
 private:
-    int port_;
-    int serverSocket_;
-    bool running_;
-    bool LogParams;
-    std::mutex routesMutex_;
-    std::mutex logMutex_;
-    ThreadPool threadpool_;
+    int port_;                            ///< 服务器端口 (Server port)
+    int serverSocket_;                    ///< 服务器套接字 (Server socket)
+    bool running_;                        ///< 服务器运行状态 (Server running status)
+    bool LogParams;                       ///< 是否记录参数 (Whether to log parameters)
+    std::mutex routesMutex_;              ///< 路由表互斥锁 (Routes mutex lock)
+    std::mutex logMutex_;                 ///< 日志互斥锁 (Log mutex lock)
+    ThreadPool threadpool_;               ///< 线程池 (Thread pool)
     
-    // 路由表：method -> (path -> handler)
+    /**
+     * @brief 路由表：method -> (path -> handler)
+     * @brief Routes table: method -> (path -> handler)
+     */
     std::map<std::string, std::map<std::string, Handler>> routes_;
     
-    // 静态成员用于信号处理
+    /**
+     * @brief 静态成员用于信号处理
+     * @brief Static member for signal handling
+     */
     static Server* instance_;
     
-    // 静态信号处理函数
+    /**
+     * @brief 静态信号处理函数
+     * @param sig 信号值
+     * @brief Static signal handler function
+     * @param sig Signal value
+     */
     static void signalHandler(int sig);
     
-    // 注册信号处理器
+    /**
+     * @brief 注册信号处理器
+     * @brief Register signal handler
+     */
     static void registerSignalHandlers();
     
 #ifdef _WIN32

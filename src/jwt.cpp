@@ -1,6 +1,14 @@
-//
-// Created by HP on 2025/11/13.
-//
+/**
+ * @file jwt.cpp
+ * @brief JWT (JSON Web Token) 功能实现
+ * 
+ * 此文件实现了JWT的核心功能，包括令牌生成、验证、签名和解析等操作。
+ * 实现采用HS256算法进行签名，支持Base64URL编码/解码，以及HMAC-SHA256加密。
+ * 
+ * This file implements the core functionality of JWT, including token generation,
+ * verification, signing, and parsing operations. It uses the HS256 algorithm for
+ * signing, supports Base64URL encoding/decoding, and HMAC-SHA256 encryption.
+ */
 
 #include "../include/jwt.h"
 #include "JsonValue.h"
@@ -13,6 +21,13 @@
 
 namespace {
 
+/**
+ * @brief SHA256算法常量数组
+ * 
+ * 这些是SHA256哈希算法中使用的常量值，基于前64个质数的立方根的小数部分的前32位。
+ * These are the constant values used in the SHA256 hash algorithm, based on 
+ * the first 32 bits of the fractional parts of the cube roots of the first 64 primes.
+ */
 constexpr std::array<std::uint32_t, 64> kSha256Constants{
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
         0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -36,6 +51,12 @@ constexpr std::array<std::uint32_t, 64> kSha256Constants{
 
 } // namespace
 
+/**
+ * @brief JWT类的单例实例指针
+ * 
+ * 静态成员变量，用于存储JWT类的唯一实例，实现单例设计模式。
+ * Static member variable to store the unique instance of the JWT class, implementing the singleton design pattern.
+ */
 JWT* JWT::instance_ = nullptr;
 
 /**
@@ -44,7 +65,14 @@ JWT* JWT::instance_ = nullptr;
  * 该构造函数用于创建JWT对象，设置默认算法为HS256，默认生存时间(TTL)为3600秒。
  * 它会检查是否已经存在JWT实例，如果存在则输出错误信息。
  *
+ * This constructor creates a JWT object, sets the default algorithm to HS256, 
+ * and default time-to-live (TTL) to 3600 seconds. It checks if a JWT instance 
+ * already exists and outputs an error message if it does.
+ *
+ * @param expiresIn JWT令牌过期时间的字符串表示
+ * @param jwtPrivateKeyPath JWT私钥文件路径
  * @note 这是一个单例模式的实现，确保系统中只有一个JWT实例
+ * @note This is a singleton pattern implementation, ensuring only one JWT instance exists in the system
  */
 JWT::JWT(const std::string& expiresIn, const std::string& jwtPrivateKeyPath) : algorithm_(Algorithm::HS256), defaultTTL_(3600) {
     // 检查是否已存在JWT实例，如果存在则输出错误信息
@@ -66,6 +94,16 @@ JWT::JWT(const std::string& expiresIn, const std::string& jwtPrivateKeyPath) : a
     instance_ = this;
 }
 
+/**
+ * @brief JWT类的构造函数，使用指定的密钥和过期时间
+ * 
+ * 创建JWT对象，设置密钥、算法为HS256，并指定默认的令牌生存时间。
+ * Creates a JWT object, sets the secret key, algorithm to HS256, and specifies the default token time-to-live.
+ * 
+ * @param secret JWT签名和验证使用的密钥
+ * @param ttlSeconds 默认令牌生存时间（秒），如果小于等于0则使用3600秒
+ * @throws std::invalid_argument 当提供的密钥为空时抛出异常
+ */
 JWT::JWT(std::string secret, long long ttlSeconds)
         : secret_(std::move(secret)), algorithm_(Algorithm::HS256), defaultTTL_(ttlSeconds > 0 ? ttlSeconds : 3600) {
     if (secret_.empty()) {
@@ -74,9 +112,14 @@ JWT::JWT(std::string secret, long long ttlSeconds)
 }
 
 /**
- * 设置JWT的密钥
+ * @brief 设置JWT的密钥
+ * 
+ * 设置用于JWT令牌签名和验证的密钥。密钥不能为空，否则会抛出异常。
+ * Sets the secret key used for JWT token signing and verification. The secret cannot be empty.
+ * 
  * @param secret 要设置的密钥字符串
  * @throws std::invalid_argument 当传入的密钥为空时抛出异常
+ * @throws std::invalid_argument Throws an exception when the provided secret is empty
  */
 void JWT::setSecret(const std::string& secret) {
     // 检查密钥是否为空
@@ -89,8 +132,11 @@ void JWT::setSecret(const std::string& secret) {
 }
 
 /**
- * 循环右移函数（Rotor函数）
- * 将一个32位无符号整数循环右指定位数
+ * @brief 循环右移函数（Rotor函数）
+ * 
+ * 将一个32位无符号整数循环右指定位数，SHA256算法的核心操作之一。
+ * Performs a cyclic right shift on a 32-bit unsigned integer, one of the core operations of the SHA256 algorithm.
+ * 
  * @param value 要进行循环右移的32位无符号整数值
  * @param count 循环右移的位数，范围应在0到31之间
  * @return 返回循环右移后的32位无符号整数值
@@ -98,6 +144,10 @@ void JWT::setSecret(const std::string& secret) {
  * 该函数通过将值右移指定位数，并将剩余高位部分左移相应位数，
  * 然后通过按位或操作组合这两个部分，实现循环右移效果。
  * 例如：rotor(0b1100, 2) 将返回 0b0011
+ * 
+ * This function implements cyclic right shift by shifting the value right by the specified number of bits,
+ * shifting the remaining high bits left by the corresponding number of bits, and combining the two parts
+ * with a bitwise OR operation. For example: rotor(0b1100, 2) will return 0b0011
  */
 inline std::uint32_t rotor(std::uint32_t value, std::uint32_t count) {
     // 右移count位，并将左移(32-count)位后的结果进行按位或操作
@@ -105,9 +155,14 @@ inline std::uint32_t rotor(std::uint32_t value, std::uint32_t count) {
     return (value >> count) | (value << (32 - count));
 }
 /**
- * 从文件中加载密钥
+ * @brief 从文件中加载密钥
+ * 
+ * 从指定的文件路径读取JWT密钥。文件以二进制模式打开，以确保正确读取所有字符。
+ * Loads the JWT secret key from the specified file path. The file is opened in binary mode to ensure all characters are read correctly.
+ * 
  * @param path 密钥文件的路径
  * @throws std::runtime_error 当文件无法打开时抛出异常
+ * @throws std::runtime_error Throws a runtime exception if the file cannot be opened
  */
 void JWT::loadSecretFromFile(const std::string& path) {
     // 以二进制模式打开文件
@@ -118,19 +173,31 @@ void JWT::loadSecretFromFile(const std::string& path) {
     // Check if file opened successfully
     if (!file.is_open()) {
         // 如果文件打开失败，抛出运行时异常
-    // Throw runtime exception if file opening fails
+        // Throw runtime exception if file opening fails
         throw std::runtime_error("Failed to open secret file: " + path);
     }
 
     // 使用字符串流来读取文件内容
+    // Use string stream to read file content
     std::ostringstream oss;
     // 将文件内容读取到字符串流中
+    // Read file content into string stream
     oss << file.rdbuf();
     // 设置读取到的内容为密钥
+    // Set the read content as the secret key
 //    std::cout<<oss.str()<<std::endl;
     setSecret(oss.str());
 }
 
+/**
+ * @brief 设置默认令牌生存时间
+ * 
+ * 设置JWT令牌的默认生存时间（TTL），单位为秒。TTL必须为正数。
+ * Sets the default time-to-live (TTL) for JWT tokens in seconds. TTL must be a positive value.
+ * 
+ * @param ttlSeconds 默认令牌生存时间（秒）
+ * @throws std::invalid_argument 当TTL小于等于0时抛出异常
+ */
 void JWT::setDefaultTTL(long long ttlSeconds) {
     if (ttlSeconds <= 0) {
         throw std::invalid_argument("TTL must be positive");
@@ -139,57 +206,77 @@ void JWT::setDefaultTTL(long long ttlSeconds) {
 }
 
 /**
- * 生成JWT令牌
+ * @brief 生成JWT令牌
+ * 
+ * 创建并返回一个完整的JWT令牌字符串，包含头部、载荷和签名部分。
+ * Generates and returns a complete JWT token string, including header, payload, and signature parts.
+ * 
  * @param customClaims 自定义声明，一个键值对映射
  * @param ttlSeconds 令牌有效期（秒），-1表示使用默认有效期
  * @return 生成的JWT令牌字符串
  * @throws std::runtime_error 当密钥未设置时抛出异常
+ * @throws std::runtime_error Throws a runtime exception if the secret key is not set
  */
 std::string JWT::generateToken(const std::map<std::string, std::string>& customClaims, long long ttlSeconds) const {
     // 检查密钥是否已设置
+    // Check if secret key is set
     if (secret_.empty()) {
 //        std::cout<<"empty"<<std::endl;
         throw std::runtime_error("JWT secret is not set");
     }
 
     // 构建并编码JWT头部
+    // Build and encode JWT header
     const auto header = buildHeader();
     const auto headerEncoded = base64UrlEncode(header);
 
     // 获取当前时间戳（秒）
+    // Get current timestamp in seconds
     auto now = std::chrono::system_clock::now();
     auto issuedAt = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
 
     // 处理令牌有效期
+    // Handle token expiration time
     long long effectiveTTL = ttlSeconds;
     if (effectiveTTL < 0) {
         effectiveTTL = defaultTTL_;  // 使用默认有效期
+        // Use default TTL if negative value provided
     }
     std::optional<long long> expiresAt;
     if (effectiveTTL > 0) {
         expiresAt = issuedAt + effectiveTTL;  // 计算过期时间戳
+        // Calculate expiration timestamp
     }
 
     // 构建并编码JWT载荷
+    // Build and encode JWT payload
     const auto payload = buildPayload(customClaims, issuedAt, expiresAt);
     const auto payloadEncoded = base64UrlEncode(payload);
 
     // 创建签名输入并生成签名
+    // Create signing input and generate signature
     const std::string signingInput = headerEncoded + "." + payloadEncoded;
     const auto signature = base64UrlEncode(hmacSha256(signingInput, secret_));
 
     // 组合头部、载荷和签名，返回完整的JWT令牌
+    // Combine header, payload and signature to return complete JWT token
     return signingInput + "." + signature;
 }
 
 /**
- * 验证JWT令牌的有效性
+ * @brief 验证JWT令牌的有效性
+ * 
+ * 验证JWT令牌的签名是否正确，并检查令牌是否已过期。
+ * Verifies if the JWT token signature is correct and checks if the token has expired.
+ * 
  * @param token 待验证的JWT令牌字符串
  * @param payloadJson 用于存储载荷JSON字符串的输出参数，可为nullptr
  * @return 验证成功返回true，失败返回false
+ * @return Returns true if the token is valid, false otherwise
  */
 bool JWT::verifyToken(const std::string& token, std::string* payloadJson) const {
     // 检查密钥是否为空
+    // Check if secret key is empty
     if (secret_.empty()) {
         return false;
     }
@@ -198,35 +285,44 @@ bool JWT::verifyToken(const std::string& token, std::string* payloadJson) const 
     // Split token into three parts (header, payload, signature)
     const auto parts = splitToken(token);
     // 检查令牌是否由三部分组成
+    // Check if token consists of three parts
     if (parts.size() != 3) {
         return false;
     }
 
     // 构造待签名的字符串（头部+载荷）
+    // Construct the signing input string (header + payload)
     const std::string signingInput = parts[0] + "." + parts[1];
     // 计算期望的签名
+    // Calculate expected signature
     const std::string expectedSignature = base64UrlEncode(hmacSha256(signingInput, secret_));
     // 验证签名是否匹配
+    // Verify if signature matches
     if (expectedSignature != parts[2]) {
         return false;
     }
 
     // 解码载荷部分
+    // Decode payload part
     const std::string payload = base64UrlDecode(parts[1]);
 
     // 检查过期时间(exp)声明
+    // Check expiration time (exp) claim
     const auto expClaim = extractNumericClaim(payload, "exp");
     if (expClaim.has_value()) {
         // 获取当前时间戳
+        // Get current timestamp
         auto now = std::chrono::system_clock::now();
         auto current = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
         // 检查是否过期
+        // Check if token has expired
         if (current > expClaim.value()) {
             return false;
         }
     }
 
     // 如果提供了payloadJson参数，则将载荷JSON字符串存入
+    // If payloadJson parameter is provided, store payload JSON string
     if (payloadJson != nullptr) {
         *payloadJson = payload;
     }
@@ -235,8 +331,13 @@ bool JWT::verifyToken(const std::string& token, std::string* payloadJson) const 
 
 /**
  * @brief 解析JWT令牌中的声明（claims）部分
+ * 
+ * 验证令牌有效性并解析其中的声明部分为键值对映射。
+ * Verifies token validity and parses its claims into a key-value map.
+ * 
  * @param token 要解析的JWT令牌字符串
  * @return 返回一个包含字符串映射的std::optional对象，如果解析失败则返回std::nullopt
+ * @return Returns a std::optional containing a string map, or std::nullopt if parsing fails
  */
 std::optional<std::map<std::string, std::string>> JWT::parseClaims(const std::string& token) const {
     std::string payload; // 用于存储令牌的payload部分
@@ -250,16 +351,32 @@ std::optional<std::map<std::string, std::string>> JWT::parseClaims(const std::st
     }
 }
 
+/**
+ * @brief 获取JWT使用的算法
+ * 
+ * 返回当前JWT实例使用的签名算法。
+ * Returns the signature algorithm used by the current JWT instance.
+ * 
+ * @return JWT::Algorithm 枚举类型，表示使用的算法
+ */
 JWT::Algorithm JWT::algorithm() const {
     return algorithm_;
 }
 
 /**
- * 构建JWT头部信息
+ * @brief 构建JWT头部信息
+ * 
+ * 生成标准的JWT头部JSON字符串，指定使用HS256算法和JWT令牌类型。
+ * Generates a standard JWT header JSON string, specifying the HS256 algorithm and JWT token type.
+ * 
  * @return 返回包含算法和类型的标准JWT头部字符串
+ * @return Returns a standard JWT header string containing algorithm and type
  *
  * 该函数返回一个固定的JWT头部字符串，使用HS256算法作为签名算法，
  * 并指定令牌类型为JWT(JSON Web Token)
+ * 
+ * This function returns a fixed JWT header string, using HS256 as the signature algorithm,
+ * and specifying the token type as JWT (JSON Web Token)
  */
 std::string JWT::buildHeader() {
     // 使用静态常量存储标准JWT头部字符串
@@ -271,11 +388,18 @@ std::string JWT::buildHeader() {
 
 /**
  * @brief JWT类的base64UrlEncode方法
+ * 
+ * 实现符合JWT规范的Base64URL编码，确保URL安全。
+ * Implements Base64URL encoding according to the JWT specification to ensure URL safety.
+ * 
  * @param data 需要进行base64Url编码的原始数据
  * @return 返回编码后的字符串
- *
+ * 
  * 该方法实现了base64Url编码，它是一种base64编码的变体，主要用于URL安全。
  * 与标准base64编码相比，它将'+'替换为'-'，'/'替换为'_'，并移除了末尾的'='填充字符。
+ * 
+ * This method implements base64Url encoding, which is a variant of base64 encoding primarily used for URL safety.
+ * Compared to standard base64 encoding, it replaces '+' with '-', '/' with '_', and removes trailing '=' padding characters.
  */
 std::string JWT::base64UrlEncode(const std::string& data) {
     // 定义base64编码表
@@ -334,11 +458,18 @@ std::string JWT::base64UrlEncode(const std::string& data) {
 
 /**
  * @brief Base64URL解码函数
+ * 
+ * 将Base64URL编码的字符串解码为原始字符串。
+ * Decodes a Base64URL encoded string back to its original form.
+ * 
  * @param data 需要解码的Base64URL字符串
  * @return 解码后的原始字符串
- *
+ * 
  * 该函数将Base64URL编码的字符串转换为原始字符串。Base64URL是Base64的变种，
  * 使用'-'和'_'替代了标准的'+'和'/'，同时不使用填充字符'='。
+ * 
+ * This function converts a Base64URL encoded string to its original string. Base64URL is a variant of Base64,
+ * using '-' and '_' instead of the standard '+' and '/', and not using padding character '='.
  */
 std::string JWT::base64UrlDecode(const std::string& data) {
     std::string base64 = data;
@@ -391,8 +522,13 @@ std::string JWT::base64UrlDecode(const std::string& data) {
 
 /**
  * @brief 计算输入字符串的SHA256哈希值
+ * 
+ * 实现SHA256加密算法，计算输入数据的哈希值。
+ * Implements the SHA256 encryption algorithm to compute the hash value of input data.
+ * 
  * @param data 输入字符串
  * @return 返回计算得到的SHA256哈希值字符串
+ * @return Returns the computed SHA256 hash value as a string
  */
 std::string JWT::sha256(const std::string& data) {
     // 初始化SHA256哈希值的初始常量
@@ -490,13 +626,18 @@ std::string JWT::sha256(const std::string& data) {
 }
 
 /**
- * HMAC-SHA256 签名算法实现
- * HMAC (Hash-based Message Authentication Code) 是一种基于哈希的消息认证码算法
- * 此函数使用SHA-256作为哈希函数实现HMAC签名
- *
+ * @brief HMAC-SHA256 签名算法实现
+ * 
+ * HMAC (Hash-based Message Authentication Code) 是一种基于哈希的消息认证码算法，
+ * 此函数使用SHA-256作为哈希函数实现HMAC签名，用于JWT令牌的安全验证。
+ * 
+ * HMAC (Hash-based Message Authentication Code) is a hash-based message authentication code algorithm.
+ * This function implements HMAC signing using SHA-256 as the hash function, used for secure JWT token verification.
+ * 
  * @param data 要签名的原始数据
  * @param key 用于签名的密钥
  * @return 返回HMAC-SHA256签名结果
+ * @return Returns the HMAC-SHA256 signature result
  */
 std::string JWT::hmacSha256(const std::string& data, const std::string& key) {
     constexpr std::size_t blockSize = 64;

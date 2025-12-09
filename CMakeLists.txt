@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 输出目录配置
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)  # 核心：exe输出到bin根目录
 
 # -------------------------- MySQL配置（纯相对路径） --------------------------
 # 基于项目根目录的相对路径（核心：避开绝对中文路径）
@@ -91,19 +91,20 @@ endif()
 
 # 链接库（核心：补充Linux依赖库，解决OpenSSL/zlib未定义引用）
 if(WIN32)
+    # 【修改1】移除原有的configure_file（避免重复复制），仅保留POST_BUILD的复制逻辑
+    # 【修改2】复制DLL到bin根目录，而非Debug/Release子目录
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            # 确保bin根目录存在（无需区分配置）
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+            # 复制libmysql.dll到bin根目录（核心修改：去掉/$<CONFIG>）
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${MYSQL_DLL_FILE}
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/
+            COMMENT "Copying libmysql.dll to ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
     target_link_libraries(${PROJECT_NAME} PRIVATE
             ws2_32          # 网络库
             ${MYSQL_LIB_FILE}  # MySQL库（相对路径）
     )
-    # 复制DLL（优化：直接复制到exe同级目录，确保单独运行能找到）
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            # 确保目标目录存在（兼容Debug/Release）
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>
-            # 复制libmysql.dll到exe所在目录（核心：单独运行时能找到）
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${MYSQL_DLL_FILE}
-            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/
-            COMMENT "Copying libmysql.dll to ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>")
 else()
     # Linux：补充MySQL依赖库（解决SSL/zlib/dl等未定义引用）
     target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -135,7 +136,8 @@ message(STATUS "MySQL头文件路径(相对): ${MYSQL_INCLUDE_DIR}")
 if(WIN32)
     message(STATUS "MySQL库文件路径(相对): ${MYSQL_LIB_FILE}")
     message(STATUS "静态链接MinGW标准库: ON")
-    message(STATUS "libmysql.dll复制路径: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>")
+    # 【修改3】更新打印的复制路径为bin根目录
+    message(STATUS "libmysql.dll复制路径: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 else()
     message(STATUS "OpenSSL库路径: ${OPENSSL_LIBRARIES}")
     message(STATUS "Zlib库路径: ${ZLIB_LIBRARIES}")

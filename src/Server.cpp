@@ -1,3 +1,13 @@
+/**
+ * @file Server.cpp
+ * @brief HTTP服务器实现文件
+ * @brief HTTP Server Implementation File
+ * 
+ * 此文件实现了基于C++的多线程HTTP服务器，支持IPv4和IPv6，
+ * 提供路由管理、请求处理、响应生成等核心功能。
+ * This file implements a multi-threaded HTTP server based on C++, supporting IPv4 and IPv6,
+ * providing core functionalities such as routing management, request handling, and response generation.
+ */
 #include "../include/Server.h"
 #include <iostream>
 #include <sstream>
@@ -31,34 +41,54 @@
 
 
 /**
- * 将map转换为JSON格式的字符串
- * Convert map to JSON formatted string
+ * @brief 将map转换为JSON格式的字符串
  * @param mp 输入的map，键值类型均为string
- * Input map with string key and value types
  * @return 返回JSON格式的字符串
- * Returns JSON formatted string
+ * @brief Convert map to JSON formatted string
+ * @param mp Input map with string key and value types
+ * @return Returns JSON formatted string
+ * @note 此辅助函数用于将字符串映射转换为简单的JSON格式
+ * @note This helper function converts string maps to simple JSON format
  */
 std::string mpToJson(const std::map<std::string, std::string>& mp) {
     std::string json = "{";  // 初始化JSON字符串，开始标记
+                           // Initialize JSON string with opening brace
     // 遍历map中的每个键值对
+    // Iterate through each key-value pair in the map
     for (const auto& pair : mp) {
         // 将键值对添加到JSON字符串中，格式为"key":"value",
+        // Add key-value pair to JSON string in "key":"value", format
         json += "\"" + pair.first + "\":\"" + pair.second + "\",";
     }
     // 如果JSON字符串不为空（即map不为空），移除最后一个多余的逗号
+    // If JSON string is not empty (map is not empty), remove the trailing comma
     if (!json.empty()) {
         json.pop_back(); // 移除最后一个逗号
+                       // Remove the last comma
     }
     json += "}";  // 添加JSON字符串的结束标记
+                 // Add JSON string closing brace
     return json;  // 返回生成的JSON字符串
+                // Return the generated JSON string
 }
 
 // 静态成员初始化
 Server* Server::instance_ = nullptr;
 
+/**
+ * @brief 服务器构造函数
+ * @param port 服务器监听端口
+ * @param printParams 是否打印请求参数
+ * @brief Server constructor
+ * @param port Server listening port
+ * @param printParams Whether to print request parameters
+ * @note 初始化服务器实例，设置端口，创建线程池，并注册信号处理函数
+ * @note Initializes server instance, sets port, creates thread pool, and registers signal handlers
+ */
 Server::Server(int port, bool printParams) : port_(port),serverSocket_(-1), running_(false), LogParams(printParams), threadpool_(std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 1) {
     instance_ = this;
     registerSignalHandlers(); // 注册信号处理函数
+                           // Register signal handlers
 }
 
 void Server::signalHandler(int /*sig*/) {
@@ -85,10 +115,12 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
 #endif
 
 /**
- * 注册信号处理函数，用于处理程序终止信号
- * 根据不同操作系统平台设置相应的信号处理机制
- * Register signal handlers for program termination signals
- * Configure appropriate signal handling mechanisms based on different operating systems
+ * @brief 注册信号处理函数，用于处理程序终止信号
+ * @brief Register signal handlers for program termination signals
+ * @note 根据不同操作系统平台设置相应的信号处理机制
+ * @note Configure appropriate signal handling mechanisms based on different operating systems
+ * @warning 此函数在服务器启动前自动调用，无需手动调用
+ * @warning This function is automatically called before server startup, no need to call manually
  */
 void Server::registerSignalHandlers() {
 #ifdef _WIN32
@@ -129,8 +161,12 @@ void Server::del(const std::string& path, Handler handler) {
 }
 
 /**
- * 服务器运行函数
- * 初始化网络环境，创建socket，绑定地址，监听连接并处理客户端请求
+ * @brief 服务器运行函数
+ * @brief Server run function
+ * @note 初始化网络环境，创建socket，绑定地址，监听连接并处理客户端请求
+ * @note Initializes network environment, creates socket, binds address, listens for connections and handles client requests
+ * @warning 此函数会阻塞直到服务器停止
+ * @warning This function will block until the server stops
  */
 void Server::run() {
 #ifdef _WIN32
