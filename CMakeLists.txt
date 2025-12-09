@@ -17,15 +17,17 @@ set(MYSQL_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mysql/include)
 set(MYSQL_LIB_FILE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mysql/lib/libmysql.lib)
 set(MYSQL_DLL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mysql/lib/libmysql.dll)
 
-# 检查文件是否存在
-if(NOT EXISTS ${MYSQL_INCLUDE_DIR})
-    message(FATAL_ERROR "MySQL头文件目录不存在: ${MYSQL_INCLUDE_DIR}")
-endif()
-if(NOT EXISTS ${MYSQL_LIB_FILE})
-    message(FATAL_ERROR "MySQL库文件不存在: ${MYSQL_LIB_FILE}")
-endif()
-if(NOT EXISTS ${MYSQL_DLL_FILE})
-    message(FATAL_ERROR "MySQL动态库不存在: ${MYSQL_DLL_FILE}")
+# 检查文件是否存在（仅Windows下检查，Linux使用系统库）
+if(WIN32)
+    if(NOT EXISTS ${MYSQL_INCLUDE_DIR})
+        message(FATAL_ERROR "MySQL头文件目录不存在: ${MYSQL_INCLUDE_DIR}")
+    endif()
+    if(NOT EXISTS ${MYSQL_LIB_FILE})
+        message(FATAL_ERROR "MySQL库文件不存在: ${MYSQL_LIB_FILE}")
+    endif()
+    if(NOT EXISTS ${MYSQL_DLL_FILE})
+        message(FATAL_ERROR "MySQL动态库不存在: ${MYSQL_DLL_FILE}")
+    endif()
 endif()
 
 # 源文件和头文件（优化：移除重复的文件指定，GLOB已包含）
@@ -46,6 +48,18 @@ target_include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${MYSQL_INCLUDE_DIR}
 )
+
+# -------------------------- 跨平台依赖查找（核心修复） --------------------------
+if(UNIX)
+    # Linux/Mac：查找系统依赖库
+    find_package(OpenSSL REQUIRED)
+    find_package(ZLIB REQUIRED)
+    # 追加Linux下的MySQL头文件（兼容系统库）
+    target_include_directories(${PROJECT_NAME} PRIVATE
+            ${OPENSSL_INCLUDE_DIR}
+            ${ZLIB_INCLUDE_DIR}
+    )
+endif()
 
 # 编译选项（核心修正：添加MinGW静态链接标准库，解决单独运行exe依赖问题）
 if(MSVC)
@@ -71,11 +85,11 @@ else()
     target_link_options(${PROJECT_NAME} PRIVATE
             -static-libstdc++
             -static-libgcc
-            -static                 # 静态链接所有可静态的库
+            $<$<BOOL:${WIN32}>:-static> # 仅Windows下全静态链接，Linux保留动态链接glibc
     )
 endif()
 
-# 链接库（核心：用相对路径指定lib文件，避开中文绝对路径）
+# 链接库（核心：补充Linux依赖库，解决OpenSSL/zlib未定义引用）
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
             ws2_32          # 网络库
@@ -91,9 +105,14 @@ if(WIN32)
             ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/
             COMMENT "Copying libmysql.dll to ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>")
 else()
+    # Linux：补充MySQL依赖库（解决SSL/zlib/dl等未定义引用）
     target_link_libraries(${PROJECT_NAME} PRIVATE
             pthread
             mysqlclient
+            ${OPENSSL_LIBRARIES}  # 解决SSL/EVP加密相关错误
+            ${ZLIB_LIBRARIES}     # 解决zlib/ZSTD压缩相关错误
+            dl                    # 解决dlopen相关错误
+            rt                    # 解决实时库相关依赖
     )
 endif()
 
@@ -111,8 +130,14 @@ enable_testing()
 message(STATUS "======================================")
 message(STATUS "项目名称: ${PROJECT_NAME}")
 message(STATUS "C++标准: ${CMAKE_CXX_STANDARD}")
+message(STATUS "系统平台: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "MySQL头文件路径(相对): ${MYSQL_INCLUDE_DIR}")
-message(STATUS "MySQL库文件路径(相对): ${MYSQL_LIB_FILE}")
-message(STATUS "静态链接MinGW标准库: ON")
-message(STATUS "libmysql.dll复制路径: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>")
+if(WIN32)
+    message(STATUS "MySQL库文件路径(相对): ${MYSQL_LIB_FILE}")
+    message(STATUS "静态链接MinGW标准库: ON")
+    message(STATUS "libmysql.dll复制路径: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>")
+else()
+    message(STATUS "OpenSSL库路径: ${OPENSSL_LIBRARIES}")
+    message(STATUS "Zlib库路径: ${ZLIB_LIBRARIES}")
+endif()
 message(STATUS "======================================")
