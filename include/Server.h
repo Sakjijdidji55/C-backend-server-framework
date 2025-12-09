@@ -192,6 +192,8 @@ private:
                 key = urlDecode(key);
                 value = urlDecode(value);
 
+                std::cout<<value.size()<<std::endl;
+
                 bodyParams[key] = JsonValue(value);
             } else {
                 // 只有key没有value的情况

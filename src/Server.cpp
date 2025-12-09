@@ -508,7 +508,7 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
     long long timestamp = static_cast<long long>(now) * 1000;
 
     // 创建缓冲区并初始化为0，用于接收客户端数据
-    char buffer[8192] = {0};
+    char buffer[81920] = {0};
     // 从客户端读取数据，读取的字节数存储在bytesRead中
     int bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
     
@@ -588,17 +588,18 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
  * @return 解析后的Request对象
  */
 Request Server::parseRequest(const std::string& requestStr) {
+    std::cout<<"requestStr: "<<requestStr.size()<<std::endl;
     // 创建Request对象和字符串流
     Request request;
     std::istringstream iss(requestStr);
     std::string line;
-    
+
     // 解析请求行（第一行）
     if (std::getline(iss, line)) {
         std::istringstream lineStream(line);
         // 提取方法和路径
         lineStream >> request.method >> request.path;
-        
+
         // 分离路径和查询参数
         size_t queryPos = request.path.find('?');
         if (queryPos != std::string::npos) {
@@ -609,7 +610,7 @@ Request Server::parseRequest(const std::string& requestStr) {
         }
         // 更新路径为不包含查询参数的部分
     }
-    
+
     // 解析头部和body
     bool inBody = false;
     std::string body;
@@ -619,7 +620,7 @@ Request Server::parseRequest(const std::string& requestStr) {
         // 空行或\r表示头部结束，body开始
             continue;
         }
-        
+
         if (!inBody) {
             size_t colonPos = line.find(':');
             if (colonPos != std::string::npos) {
@@ -633,18 +634,20 @@ Request Server::parseRequest(const std::string& requestStr) {
                 key.erase(key.find_last_not_of(" \t\r") + 1);
                 value.erase(0, value.find_first_not_of(" \t\r"));
                 value.erase(value.find_last_not_of(" \t\r") + 1);
-                
+
                 request.headers[key] = value;
-//                std::cout<<"key: "<<key<<" value: "<<value<<std::endl;
             }
         } else {
             body += line;
             if (!iss.eof()) body += "\n";
         }
     }
-    
+
     request.body = body;
     request.parseBody();
+
+    std::cout<<"request.body: "<<request.body.size()<<std::endl;
+
     return request;
 }
 
@@ -861,4 +864,3 @@ std::string Server::getClientIP(const sockaddr_in *clientAddress) {
 Server* Server::getInstance() {
     return instance_;
 }
-

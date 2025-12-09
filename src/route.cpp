@@ -11,10 +11,12 @@ void registerRoutes(Server &app) {
     // GET / - 首页
     // GET / - Home page
     app.get("/", [](const Request& /*req*/, Response& res) {
+//        req.show();
         res.json(R"({"message":"Welcome to C++ Server"})");
     });
 
     app.post("/", [](const Request& req, Response& res) {
+        req.show();
         res.success(req.bodyParams);
     });
 }
