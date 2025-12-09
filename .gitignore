@@ -1,75 +1,117 @@
 # ==========================
-# CMake 构建产物（忽略）
+# 【核心】CMake 构建产物（全量忽略）
 # ==========================
-# 构建目录（debug/release 均忽略）
+# 构建目录（CLion默认生成的debug/release目录）
 cmake-build-*/
-# CMake 缓存和临时文件
+# CMake 核心缓存/临时文件
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/
 Testing/
 CTestTestfile.cmake
-# 构建生成的 Makefile 和安装相关文件
+# 构建生成的编译脚本
 Makefile
 cmake_install.cmake
 install_manifest.txt
-# 依赖下载目录（FetchContent 生成）
+# FetchContent 下载的依赖目录
 _deps/
-# 本地用户配置（不共享）
+# CLion的CMake用户配置（本地独有，不上传）
 CMakeLists.txt.user
 CMakeUserPresets.json
 
 # ==========================
-# CLion IDE 配置（忽略）
+# 【核心】IDE 配置（全量忽略）
 # ==========================
+# CLion/IntelliJ 配置
 .idea/
 *.iws
 *.iml
 *.ipr
 out/
 .localhistory/
-
+# VSCode 配置
 .vscode/
+*.code-workspace
+# Visual Studio 配置（备用，防止混用IDE）
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.sdf
+*.opensdf
+ipch/
+
 # ==========================
-# 通用 C++ 构建产物（忽略）
+# 【核心】C++ 编译产物（分环境精准忽略）
 # ==========================
-# 可执行文件
-*.out
+# 可执行文件（Windows/类Unix 全覆盖）
 *.exe
-# 目标文件和库文件
+*.exe.*
+*.out
+*.app
+# 目标文件（编译中间产物）
 *.o
 *.obj
-*.a
-*.so
-*.so.*
-*.dll
-*.dylib
-# 编译中间文件
+# 库文件（区分「需保留」和「需忽略」）
+*.a        # 静态库（类Unix，全忽略）
+*.so       # 动态库（Linux，全忽略）
+*.so.*     # 动态库版本（Linux，全忽略）
+*.dylib    # 动态库（macOS，全忽略）
+*.dll      # 动态库（Windows，默认忽略）
+!3rdparty/mysql/lib/libmysql.dll  # 例外：保留MySQL核心DLL
+*.lib      # 导入库（Windows，默认忽略）
+!3rdparty/mysql/lib/libmysql.lib  # 例外：保留MySQL核心LIB
+# 预编译头/中间文件
 *.gch
 *.pch
 *.dep
 *.d
-# 调试相关
+*.ninja
+# 调试文件
 *.su
 *.gdb
 *.dSYM/
+*.pdb
+*.idb
 # 临时文件
-.DS_Store
 *.swp
 *~
+.DS_Store       # macOS 隐藏文件
+Thumbs.db       # Windows 缩略图缓存
+ehthumbs.db
 
 # ==========================
-# 框架专属（忽略，可选补充）
+# 【业务】项目专属忽略（按需调整）
 # ==========================
+# 日志目录
 logs/
+*.log
+# 本地配置文件（不上传，避免环境冲突）
 config/local.json
 config/local.ini
+config/*.env
+# 数据库文件（本地测试用，不上传）
 *.db
 *.sqlite3
+*.db-journal
+# 测试/临时数据
+test_data/
+tmp/
+temp/
+# 打包产物
+*.zip
+*.tar.gz
+*.7z
 
 # ==========================
-# 以下 CMake 核心配置文件会自动保留（无需添加到 .gitignore）
+# 【例外】强制保留的文件（防止误忽略）
 # ==========================
-# CMakeLists.txt（项目核心配置，必须提交）
-# *.cmake（自定义模块/配置文件，如 FindXXX.cmake，自动保留）
-# cmake/ 目录（若有，存放 CMake 模块，自动保留）
+# 保留空目录的占位文件
+!.gitkeep
+# 保留自定义CMake模块
+!cmake/*.cmake
+# 保留项目核心配置
+!CMakeLists.txt
+!README.md
+!LICENSE
