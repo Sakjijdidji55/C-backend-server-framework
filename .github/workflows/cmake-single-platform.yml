@@ -19,62 +19,57 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies (MariaDB + Redis)
+      - name: Install system dependencies
         run: |
-          # 清理并更新源（避免重复配置警告）
-          rm -f /etc/apt/sources.list.d/ubuntu.sources  # 删除冲突的源配置
-          apt clean
-          apt update -y --fix-missing
-          
-          # 安装依赖
-          apt install -y libmariadb-dev libhiredis-dev libssl-dev zlib1g-dev cmake g++ make
-          
-          # 创建软链接
-          if [ -f "/usr/lib/x86_64-linux-gnu/libmariadb.so" ]; then
-            ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
-          else
-            echo "错误：MariaDB库文件不存在" && exit 1
-          fi
+          # 配置完整源（包含所有必要组件）
+          cat > /etc/apt/sources.list <<EOF
+          deb http://archive.ubuntu.com/ubuntu noble main universe restricted multiverse
+          deb http://archive.ubuntu.com/ubuntu noble-updates main universe restricted multiverse
+          deb http://archive.ubuntu.com/ubuntu noble-security main universe restricted multiverse
+          EOF
 
-          if [ -d "/usr/include/mariadb" ]; then
-            ln -sf /usr/include/mariadb/ /usr/include/mysql
-          else
-            echo "错误：MariaDB头文件目录不存在" && exit 1
-          fi
+          # 强制更新源并忽略警告
+          apt update -y -qq > /dev/null
 
-          # 验证依赖（适配MariaDB的宏定义）
-          echo "=== 验证依赖版本 ==="
-          g++ --version || { echo "g++未安装"; exit 1; }
-          cmake --version || { echo "cmake未安装"; exit 1; }
-          
-          echo "=== 验证MySQL/MariaDB ==="
-          ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so || { echo "MySQL链接失败"; exit 1; }
-          # 检查MariaDB特有的版本宏，适配MariaDB头文件
-          grep -q "MARIADB_VERSION" /usr/include/mysql/mysql.h || { echo "MariaDB头文件无效"; exit 1; }
-          
-          echo "=== 验证Redis ==="
-          ls -l /usr/lib/x86_64-linux-gnu/libhiredis.so || { echo "Redis库失败"; exit 1; }
-          grep -q "HIREDIS_MAJOR" /usr/include/hiredis/hiredis.h || { echo "Redis头文件无效"; exit 1; }
+          # 安装依赖（修正g+为g++）
+          apt install -y -qq \
+            libmariadb-dev \
+            libhiredis-dev \
+            libssl-dev \
+            zlib1g-dev \
+            cmake \
+            g++ \
+            make > /dev/null
+
+          # 创建MySQL兼容链接
+          ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
+          ln -sf /usr/include/mariadb/ /usr/include/mysql
+
+          # 验证安装
+          if ! command -v g++ &> /dev/null; then
+            echo "g++未安装" && exit 1
+          fi
+          if ! command -v cmake &> /dev/null; then
+            echo "cmake未安装" && exit 1
+          fi
+          if [ ! -f "/usr/lib/x86_64-linux-gnu/libmysqlclient.so" ]; then
+            echo "MySQL链接失败" && exit 1
+          fi
+          if [ ! -f "/usr/include/mysql/mysql.h" ]; then
+            echo "MariaDB头文件缺失" && exit 1
+          fi
 
       - name: Configure CMake
         run: |
           cmake -B ${{ github.workspace }}/build \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_CXX_COMPILER=g++ \
-            --log-level=VERBOSE 2>&1 | tee cmake_config.log
+            -DCMAKE_CXX_COMPILER=g++
 
       - name: Build
         run: |
           cmake --build ${{ github.workspace }}/build \
             --config ${{ env.BUILD_TYPE }} \
-            --parallel $(nproc) \
-            --verbose 2>&1 | tee build.log
-          
-          if [ $? -ne 0 ]; then
-            echo -e "\n=== 编译错误详情 ==="
-            tail -n 200 build.log
-            exit 1
-          fi
+            --parallel $(nproc)
 
       - name: Test
         working-directory: ${{ github.workspace }}/build
@@ -90,9 +85,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: |
-            ${{ github.workspace }}/cmake_config.log
-            ${{ github.workspace }}/build.log
-            ${{ github.workspace }}/build/CMakeFiles/CMakeError.log
-            ${{ github.workspace }}/build/CMakeFiles/CMakeOutput.log
-          retention-days: 7
+          path: ${{ github.workspace }}/build/CMakeFiles/CMakeError.log
