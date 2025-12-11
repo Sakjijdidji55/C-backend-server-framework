@@ -21,42 +21,69 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          # 配置完整源（包含所有必要组件）
+          # 彻底清理冲突的源配置
+          rm -f /etc/apt/sources.list
+          rm -f /etc/apt/sources.list.d/*.list
+          rm -f /etc/apt/sources.list.d/*.sources
+
+          # 重新配置唯一源
           cat > /etc/apt/sources.list <<EOF
           deb http://archive.ubuntu.com/ubuntu noble main universe restricted multiverse
           deb http://archive.ubuntu.com/ubuntu noble-updates main universe restricted multiverse
           deb http://archive.ubuntu.com/ubuntu noble-security main universe restricted multiverse
           EOF
 
-          # 强制更新源并忽略警告
-          apt update -y -qq > /dev/null
-
-          # 安装依赖（修正g+为g++）
-          apt install -y -qq \
+          # 更新源并安装依赖（显式指定所有包，确保无拼写错误）
+          apt update -y
+          apt install -y \
             libmariadb-dev \
             libhiredis-dev \
             libssl-dev \
             zlib1g-dev \
             cmake \
             g++ \
-            make > /dev/null
+            make \
+            apt-utils  # 解决debconf警告
 
           # 创建MySQL兼容链接
-          ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
-          ln -sf /usr/include/mariadb/ /usr/include/mysql
+          if [ -f "/usr/lib/x86_64-linux-gnu/libmariadb.so" ]; then
+            ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
+          else
+            echo "错误：MariaDB库文件不存在" && exit 1
+          fi
 
-          # 验证安装
-          if ! command -v g++ &> /dev/null; then
-            echo "g++未安装" && exit 1
+          if [ -d "/usr/include/mariadb" ]; then
+            ln -sf /usr/include/mariadb/ /usr/include/mysql
+          else
+            echo "错误：MariaDB头文件目录不存在" && exit 1
           fi
-          if ! command -v cmake &> /dev/null; then
-            echo "cmake未安装" && exit 1
+
+          # 改进验证逻辑（直接检查命令版本）
+          echo "=== 验证依赖版本 ==="
+          if ! g++ --version >/dev/null 2>&1; then
+            echo "错误：g++未安装" && exit 1
           fi
-          if [ ! -f "/usr/lib/x86_64-linux-gnu/libmysqlclient.so" ]; then
-            echo "MySQL链接失败" && exit 1
+          if ! cmake --version >/dev/null 2>&1; then
+            echo "错误：cmake未安装" && exit 1
+          fi
+          if ! make --version >/dev/null 2>&1; then
+            echo "错误：make未安装" && exit 1
+          fi
+          
+          echo "=== 验证MySQL/MariaDB ==="
+          if [ ! -L "/usr/lib/x86_64-linux-gnu/libmysqlclient.so" ]; then
+            echo "错误：MySQL链接失败" && exit 1
           fi
           if [ ! -f "/usr/include/mysql/mysql.h" ]; then
-            echo "MariaDB头文件缺失" && exit 1
+            echo "错误：MariaDB头文件缺失" && exit 1
+          fi
+          
+          echo "=== 验证Redis ==="
+          if [ ! -f "/usr/lib/x86_64-linux-gnu/libhiredis.so" ]; then
+            echo "错误：Redis库失败" && exit 1
+          fi
+          if [ ! -f "/usr/include/hiredis/hiredis.h" ]; then
+            echo "错误：Redis头文件无效" && exit 1
           fi
 
       - name: Configure CMake
@@ -85,4 +112,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: ${{ github.workspace }}/build/CMakeFiles/CMakeError.log
+          path: |
+            ${{ github.workspace }}/build/CMakeFiles/CMakeError.log
+            ${{ github.workspace }}/build/CMakeFiles/CMakeOutput.log
