@@ -8,34 +8,33 @@ on:
 
 env:
   BUILD_TYPE: Release
-  # 明确指定 Ubuntu 版本，避免环境差异
-  UBUNTU_VERSION: noble
 
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:${{ env.UBUNTU_VERSION }}
-      options: --user root  # 确保容器内有足够权限
+      # 直接硬编码版本，避免早期解析阶段的变量引用问题
+      image: ubuntu:noble
+      options: --user root
+    # 若需使用变量，可在此处定义job级别的env（可选）
+    # env:
+    #   UBUNTU_VERSION: noble
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies (MariaDB + Redis)
         run: |
-          # 配置基础源（解决容器内源可能缺失的问题）
-          echo "deb http://archive.ubuntu.com/ubuntu $UBUNTU_VERSION main universe restricted multiverse" > /etc/apt/sources.list
-          echo "deb http://archive.ubuntu.com/ubuntu $UBUNTU_VERSION-updates main universe restricted multiverse" >> /etc/apt/sources.list
-          echo "deb http://archive.ubuntu.com/ubuntu $UBUNTU_VERSION-security main universe restricted multiverse" >> /etc/apt/sources.list
+          # 配置基础源
+          echo "deb http://archive.ubuntu.com/ubuntu noble main universe restricted multiverse" > /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu noble-updates main universe restricted multiverse" >> /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu noble-security main universe restricted multiverse" >> /etc/apt/sources.list
 
-          # 清理并更新源（强制刷新索引）
           apt clean
-          apt update -y --fix-missing  # 修复可能的源文件缺失
-
-          # 安装依赖（一行式写法，彻底避免换行符问题）
+          apt update -y --fix-missing
           apt install -y libmariadb-dev libhiredis-dev libssl-dev zlib1g-dev cmake g++ make
 
-          # 幂等创建软链接（添加路径检查，确保源文件存在）
+          # 软链接与验证步骤（保持不变）
           if [ -f "/usr/lib/x86_64-linux-gnu/libmariadb.so" ]; then
             ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
           else
@@ -48,7 +47,6 @@ jobs:
             echo "错误：MariaDB头文件目录不存在" && exit 1
           fi
 
-          # 验证所有依赖（添加版本检查）
           echo "=== 验证依赖版本 ==="
           g++ --version || { echo "g++未安装"; exit 1; }
           cmake --version || { echo "cmake未安装"; exit 1; }
@@ -72,7 +70,7 @@ jobs:
         run: |
           cmake --build ${{ github.workspace }}/build \
             --config ${{ env.BUILD_TYPE }} \
-            --parallel $(nproc) \  # 自动适配CPU核心数
+            --parallel $(nproc) \
             --verbose 2>&1 | tee build.log
           
           if [ $? -ne 0 ]; then
@@ -100,4 +98,4 @@ jobs:
             ${{ github.workspace }}/build.log
             ${{ github.workspace }}/build/CMakeFiles/CMakeError.log
             ${{ github.workspace }}/build/CMakeFiles/CMakeOutput.log
-          retention-days: 7  # 日志保留7天
+          retention-days: 7
