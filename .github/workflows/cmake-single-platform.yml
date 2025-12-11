@@ -16,33 +16,68 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 核心修复：改用MariaDB兼容库（无需MySQL官方源）+ 跳过GPG验证
-      - name: Install system dependencies (MariaDB替代MySQL)
+      # 修复1：添加Redis依赖 + 安全优化 + 幂等软链接
+      - name: Install system dependencies (MariaDB + Redis)
         run: |
+          # 清理缓存并更新源（避免包索引过期）
+          sudo apt clean
           sudo apt update -y
-          # 1. 安装MariaDB客户端开发库（完全兼容MySQL API，无需添加任何源）
-          sudo apt install -y --allow-unauthenticated \
-            libmariadb-dev \
-            libssl-dev \
-            zlib1g-dev \
+          
+          # 安装依赖（移除不安全的--allow-unauthenticated，添加Redis库）
+          sudo apt install -y \
+            libmariadb-dev \          # MariaDB客户端（兼容MySQL）
+            libhiredis-dev \          # Redis客户端开发库（核心新增）
+            libssl-dev \              # OpenSSL依赖
+            zlib1g-dev \              # Zlib依赖
             cmake \
             g++ \
             make
           
-          # 2. 创建软链接，让CMake能找到mysqlclient（MariaDB兼容）
-          sudo ln -s /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
-          sudo ln -s /usr/include/mariadb/ /usr/include/mysql
+          # 修复2：幂等创建软链接（-f强制覆盖，避免"文件已存在"错误）
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
+          sudo ln -sf /usr/include/mariadb/ /usr/include/mysql
           
-          # 3. 验证安装
-          ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so
-          ls -l /usr/include/mysql/
+          # 验证关键依赖是否存在
+          echo "=== 验证MySQL/MariaDB链接 ==="
+          ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so || { echo "MySQL库链接失败"; exit 1; }
+          ls -l /usr/include/mysql/mysql.h || { echo "MySQL头文件缺失"; exit 1; }
+          
+          echo "=== 验证Redis依赖 ==="
+          ls -l /usr/lib/x86_64-linux-gnu/libhiredis.so || { echo "Redis库缺失"; exit 1; }
+          ls -l /usr/include/hiredis/hiredis.h || { echo "Redis头文件缺失"; exit 1; }
 
+      # 修复3：输出CMake详细配置日志，便于排查依赖问题
       - name: Configure CMake
-        run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        run: |
+          cmake -B ${{github.workspace}}/build \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            --log-level=VERBOSE 2>&1 | tee cmake_config.log
 
+      # 修复4：输出编译详细日志，快速定位错误
       - name: Build
-        run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 4
+        run: |
+          cmake --build ${{github.workspace}}/build \
+            --config ${{env.BUILD_TYPE}} \
+            --parallel 4 \
+            --verbose 2>&1 | tee build.log
+          # 若编译失败，打印最后100行日志
+          if [ $? -ne 0 ]; then
+            echo -e "\n=== 编译失败，关键错误信息 ==="
+            tail -n 100 build.log
+            exit 1
+          fi
 
       - name: Test
         working-directory: ${{github.workspace}}/build
         run: ctest -C ${{env.BUILD_TYPE}} || echo "Tests skipped (no tests defined)"
+
+      # 修复5：构建失败时上传日志，方便排查
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ${{github.workspace}}/cmake_config.log
+            ${{github.workspace}}/build.log
+            ${{github.workspace}}/build/CMakeFiles/CMakeError.log
