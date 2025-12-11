@@ -8,76 +8,96 @@ on:
 
 env:
   BUILD_TYPE: Release
+  # 明确指定 Ubuntu 版本，避免环境差异
+  UBUNTU_VERSION: noble
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:${{ env.UBUNTU_VERSION }}
+      options: --user root  # 确保容器内有足够权限
 
     steps:
       - uses: actions/checkout@v4
 
-      # 修复1：添加Redis依赖 + 安全优化 + 幂等软链接
       - name: Install system dependencies (MariaDB + Redis)
         run: |
-          # 清理缓存并更新源（避免包索引过期）
-          sudo apt clean
-          sudo apt update -y
-          
-          # 安装依赖（移除不安全的--allow-unauthenticated，添加Redis库）
-          sudo apt install -y \
-            libmariadb-dev \          # MariaDB客户端（兼容MySQL）
-            libhiredis-dev \          # Redis客户端开发库（核心新增）
-            libssl-dev \              # OpenSSL依赖
-            zlib1g-dev \              # Zlib依赖
-            cmake \
-            g++ \
-            make
-          
-          # 修复2：幂等创建软链接（-f强制覆盖，避免"文件已存在"错误）
-          sudo ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
-          sudo ln -sf /usr/include/mariadb/ /usr/include/mysql
-          
-          # 验证关键依赖是否存在
-          echo "=== 验证MySQL/MariaDB链接 ==="
-          ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so || { echo "MySQL库链接失败"; exit 1; }
-          ls -l /usr/include/mysql/mysql.h || { echo "MySQL头文件缺失"; exit 1; }
-          
-          echo "=== 验证Redis依赖 ==="
-          ls -l /usr/lib/x86_64-linux-gnu/libhiredis.so || { echo "Redis库缺失"; exit 1; }
-          ls -l /usr/include/hiredis/hiredis.h || { echo "Redis头文件缺失"; exit 1; }
+          # 配置基础源（解决容器内源可能缺失的问题）
+          echo "deb http://archive.ubuntu.com/ubuntu $UBUNTU_VERSION main universe restricted multiverse" > /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu $UBUNTU_VERSION-updates main universe restricted multiverse" >> /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu $UBUNTU_VERSION-security main universe restricted multiverse" >> /etc/apt/sources.list
 
-      # 修复3：输出CMake详细配置日志，便于排查依赖问题
+          # 清理并更新源（强制刷新索引）
+          apt clean
+          apt update -y --fix-missing  # 修复可能的源文件缺失
+
+          # 安装依赖（一行式写法，彻底避免换行符问题）
+          apt install -y libmariadb-dev libhiredis-dev libssl-dev zlib1g-dev cmake g++ make
+
+          # 幂等创建软链接（添加路径检查，确保源文件存在）
+          if [ -f "/usr/lib/x86_64-linux-gnu/libmariadb.so" ]; then
+            ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
+          else
+            echo "错误：MariaDB库文件不存在" && exit 1
+          fi
+
+          if [ -d "/usr/include/mariadb" ]; then
+            ln -sf /usr/include/mariadb/ /usr/include/mysql
+          else
+            echo "错误：MariaDB头文件目录不存在" && exit 1
+          fi
+
+          # 验证所有依赖（添加版本检查）
+          echo "=== 验证依赖版本 ==="
+          g++ --version || { echo "g++未安装"; exit 1; }
+          cmake --version || { echo "cmake未安装"; exit 1; }
+          
+          echo "=== 验证MySQL/MariaDB ==="
+          ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so || { echo "MySQL链接失败"; exit 1; }
+          grep -q "MYSQL_VERSION" /usr/include/mysql/mysql.h || { echo "MySQL头文件无效"; exit 1; }
+          
+          echo "=== 验证Redis ==="
+          ls -l /usr/lib/x86_64-linux-gnu/libhiredis.so || { echo "Redis库失败"; exit 1; }
+          grep -q "HIREDIS_MAJOR" /usr/include/hiredis/hiredis.h || { echo "Redis头文件无效"; exit 1; }
+
       - name: Configure CMake
         run: |
-          cmake -B ${{github.workspace}}/build \
-            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+          cmake -B ${{ github.workspace }}/build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_CXX_COMPILER=g++ \
             --log-level=VERBOSE 2>&1 | tee cmake_config.log
 
-      # 修复4：输出编译详细日志，快速定位错误
       - name: Build
         run: |
-          cmake --build ${{github.workspace}}/build \
-            --config ${{env.BUILD_TYPE}} \
-            --parallel 4 \
+          cmake --build ${{ github.workspace }}/build \
+            --config ${{ env.BUILD_TYPE }} \
+            --parallel $(nproc) \  # 自动适配CPU核心数
             --verbose 2>&1 | tee build.log
-          # 若编译失败，打印最后100行日志
+          
           if [ $? -ne 0 ]; then
-            echo -e "\n=== 编译失败，关键错误信息 ==="
-            tail -n 100 build.log
+            echo -e "\n=== 编译错误详情 ==="
+            tail -n 200 build.log
             exit 1
           fi
 
       - name: Test
-        working-directory: ${{github.workspace}}/build
-        run: ctest -C ${{env.BUILD_TYPE}} || echo "Tests skipped (no tests defined)"
+        working-directory: ${{ github.workspace }}/build
+        run: |
+          if [ -f "CTestTestfile.cmake" ]; then
+            ctest -C ${{ env.BUILD_TYPE }} --output-on-failure
+          else
+            echo "无测试用例，跳过测试"
+          fi
 
-      # 修复5：构建失败时上传日志，方便排查
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
           path: |
-            ${{github.workspace}}/cmake_config.log
-            ${{github.workspace}}/build.log
-            ${{github.workspace}}/build/CMakeFiles/CMakeError.log
+            ${{ github.workspace }}/cmake_config.log
+            ${{ github.workspace }}/build.log
+            ${{ github.workspace }}/build/CMakeFiles/CMakeError.log
+            ${{ github.workspace }}/build/CMakeFiles/CMakeOutput.log
+          retention-days: 7  # 日志保留7天
