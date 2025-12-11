@@ -16,15 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 核心修复：改用MariaDB兼容库（无需MySQL官方源）+ 跳过GPG验证
-      - name: Install system dependencies (MariaDB替代MySQL)
+      # 核心修复：1. 安装hiredis（Redis库） 2. MariaDB兼容MySQL 3. 跳过GPG验证
+      - name: Install system dependencies (MariaDB + Redis)
         run: |
           sudo apt update -y
-          # 1. 安装MariaDB客户端开发库（完全兼容MySQL API，无需添加任何源）
+          # 1. 安装所有依赖（新增 libhiredis-dev 解决Redis查找失败）
           sudo apt install -y --allow-unauthenticated \
-            libmariadb-dev \
-            libssl-dev \
-            zlib1g-dev \
+            libmariadb-dev \          # MariaDB客户端开发库（兼容MySQL）
+            libssl-dev \              # OpenSSL（原有依赖）
+            zlib1g-dev \              # Zlib（原有依赖）
+            libhiredis-dev \          # Redis客户端开发库（新增核心）
             cmake \
             g++ \
             make
@@ -33,9 +34,13 @@ jobs:
           sudo ln -s /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
           sudo ln -s /usr/include/mariadb/ /usr/include/mysql
           
-          # 3. 验证安装
+          # 3. 验证安装（新增Redis库验证）
+          echo "=== 验证MySQL/MariaDB链接 ==="
           ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so
           ls -l /usr/include/mysql/
+          echo "=== 验证Redis库 ==="
+          ls -l /usr/lib/x86_64-linux-gnu/libhiredis.so
+          ls -l /usr/include/hiredis/
 
       - name: Configure CMake
         run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
