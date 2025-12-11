@@ -50,7 +50,7 @@ bool RdConnector::connect() {
     }
     // 将端口号字符串转换为整数
     // Convert port string to integer
-    int port ;
+    int port = -1;
     try {
         port = std::stoi(port_);
     } catch (...) {

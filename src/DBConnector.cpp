@@ -46,7 +46,7 @@ DBConnector::DBConnector(std::string host, std::string user,
                          unsigned int port)
         : db_(nullptr), host_(std::move(host)),
           user_(std::move(user)), passwd_(std::move(passwd)),
-          dbname_(std::move(dbname)), port_(port), last_error_("") {
+          dbname_(std::move(dbname)), port_(port) {
     // 初始化MySQL句柄
     // Initialize MySQL handle
     db_ = mysql_init(nullptr);

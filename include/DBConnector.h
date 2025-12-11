@@ -63,7 +63,7 @@ private:
      * @brief Free result set (internal utility function)
      * @param res 待释放的结果集指针
      */
-    void freeResult(MYSQL_RES* res);
+    static void freeResult(MYSQL_RES* res);
 
 public:
     /**

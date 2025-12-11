@@ -51,6 +51,8 @@ int main() {
 //            "name", // 数据库名 Database name
 //            3306            // 端口 Port
 //    );
+//
+//    DBConnector::getInstance()->execute("SELECT * FROM users");
 
     // 创建服务器实例，指定监听端口8080
     // Create server instance, specifying port 8080 for listening
