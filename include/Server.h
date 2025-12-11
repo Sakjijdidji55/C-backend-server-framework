@@ -18,7 +18,7 @@
 #include <sstream>
 #include <cstdio>
 #include "JsonValue.h"
-
+#include <fstream>
 
 #ifdef _WIN32
 #include <winsock2.h>    // Windows平台网络头文件 (Windows platform network header)

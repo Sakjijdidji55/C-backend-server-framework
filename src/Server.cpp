@@ -14,7 +14,7 @@
 #include <thread>
 #include <cstring>
 #include <utility>
-#include <signal.h>
+#include <csignal>
 #include <iomanip>
 #include <ctime>
 
