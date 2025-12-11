@@ -99,8 +99,24 @@ jobs:
             --parallel $(nproc)
 
       - name: Test
-        working-directory: ${{ github.workspace }}/build
         run: |
+          # 明确使用工作区变量定位 build 目录
+          BUILD_DIR="${{ github.workspace }}/build"
+          echo "检查 build 目录: $BUILD_DIR"
+
+          # 验证目录存在性
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "错误：build 目录不存在 - $BUILD_DIR"
+            exit 1
+          fi
+
+          # 进入 build 目录执行测试
+          cd "$BUILD_DIR" || {
+            echo "错误：无法进入 build 目录 - $BUILD_DIR"
+            exit 1
+          }
+
+          # 执行测试（如果测试文件存在）
           if [ -f "CTestTestfile.cmake" ]; then
             ctest -C ${{ env.BUILD_TYPE }} --output-on-failure
           else
