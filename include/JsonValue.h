@@ -1,6 +1,8 @@
-//
-// Created by HP on 2025/11/5.
-//
+// @file JsonValue.h
+// @brief JSON值类型类头文件
+// 提供完整的JSON值表示，支持嵌套结构的JSON数据处理
+// JSON value type class header file
+// Provides complete JSON value representation, supporting nested structured JSON data processing
 
 #ifndef CBSF_JSONVALUE_H
 #define CBSF_JSONVALUE_H
@@ -12,7 +14,9 @@
 #include <stdexcept>
 #include <algorithm>
 /**
+ * @class JsonValue
  * @brief JSON值类型类，支持嵌套结构的JSON数据
+ * JSON value type class that supports nested structured JSON data
  * 
  * 该类提供了完整的JSON值表示，支持以下类型：
  * - NULL_TYPE: null值
@@ -21,8 +25,6 @@
  * - BOOLEAN: 布尔值
  * - OBJECT: 对象（键值对映射）
  * - ARRAY: 数组
- * 
- * @brief JSON value type class that supports nested structured JSON data
  * 
  * This class provides complete JSON value representation, supporting the following types:
  * - NULL_TYPE: null value
@@ -143,37 +145,49 @@ public:
 
     /**
      * @brief 获取数字值
-     * @return 数字值
+     * Get numeric value
+     * @return 数字值，如果类型不是NUMBER则返回0
+     * Numeric value, returns 0 if type is not NUMBER
      */
     [[nodiscard]] double asNumber() const;
 
     /**
      * @brief 获取布尔值
-     * @return 布尔值
+     * Get boolean value
+     * @return 布尔值，如果类型不是BOOLEAN则返回false
+     * Boolean value, returns false if type is not BOOLEAN
      */
     [[nodiscard]] bool asBoolean() const;
 
     /**
      * @brief 获取对象值
-     * @return 对象映射
+     * Get object value
+     * @return 对象映射，如果类型不是OBJECT则返回空映射
+     * Object map, returns empty map if type is not OBJECT
      */
     [[nodiscard]] std::map<std::string, JsonValue> asObject() const;
 
     /**
      * @brief 获取数组值
-     * @return JsonValue数组
+     * Get array value
+     * @return JsonValue数组，如果类型不是ARRAY则返回空数组
+     * JsonValue array, returns empty array if type is not ARRAY
      */
     [[nodiscard]] std::vector<JsonValue> asArray() const;
 
     /**
      * @brief 转换为JSON字符串
+     * Convert to JSON string
      * @return JSON格式的字符串
+     * JSON formatted string
      */
     [[nodiscard]] std::string toJson() const;
 
     /**
     * @brief 从JSON字符串解析并填充对象属性
-    * @param jsonStr 输入的JSON格式字符串，用于解析并填充对象的属性
+     * Parse and populate object properties from JSON string
+     * @param jsonStr 输入的JSON格式字符串，用于解析并填充对象的属性
+     * Input JSON format string used to parse and populate object properties
     */
     void fromJson(const std::string& jsonStr);
 
@@ -192,7 +206,13 @@ public:
      */
     static JsonValue array(const std::vector<JsonValue>& arr);
 
-// 辅助函数：解析字符串（处理转义字符）
+/**
+     * @brief 辅助函数：解析JSON字符串（处理转义字符）
+     * Helper function: Parse JSON string (handle escape characters)
+     * @param jsonStr JSON字符串
+     * @param pos 当前解析位置
+     * @return 解析后的字符串
+     */
     static std::string parseString(const std::string& jsonStr, size_t& pos) {
         pos++; // 跳过开头的 "
         std::string result;
@@ -226,12 +246,12 @@ public:
     }
 
 private:
-    Type type_;                                    ///< 值的类型
-    std::string stringValue_;                     ///< 字符串值
-    double numberValue_;                          ///< 数字值
-    bool boolValue_;                              ///< 布尔值
-    std::map<std::string, JsonValue> objectValue_; ///< 对象值
-    std::vector<JsonValue> arrayValue_;           ///< 数组值
+    Type type_;                                    ///< 值的类型 Type of value
+    std::string stringValue_;                     ///< 字符串值 String value
+    double numberValue_;                          ///< 数字值 Numeric value
+    bool boolValue_;                              ///< 布尔值 Boolean value
+    std::map<std::string, JsonValue> objectValue_; ///< 对象值 Object value
+    std::vector<JsonValue> arrayValue_;           ///< 数组值 Array value
 
     /**
      * @brief 转义JSON字符串中的特殊字符
@@ -240,6 +260,13 @@ private:
      */
     [[nodiscard]] static std::string escapeJsonString(const std::string& str) ;
 
+    /**
+     * @brief 辅助函数：跳过空白字符
+     * Helper function: Skip whitespace characters
+     * @param jsonStr JSON字符串
+     * @param pos 当前位置
+     * @return 跳过空白后的位置
+     */
     static size_t skipWhitespace(const std::string& jsonStr, size_t pos) {
         while (pos < jsonStr.size() && std::isspace(static_cast<unsigned char>(jsonStr[pos]))) {
             pos++;
@@ -247,7 +274,13 @@ private:
         return pos;
     }
 
-// 辅助函数：解析数字
+    /**
+     * @brief 辅助函数：解析数字
+     * Helper function: Parse number
+     * @param jsonStr JSON字符串
+     * @param pos 当前解析位置
+     * @return 解析后的数字
+     */
     static double parseNumber(const std::string& jsonStr, size_t& pos) {
         size_t start = pos;
         // 处理负号
@@ -284,7 +317,13 @@ private:
         }
     }
 
-// 辅助函数：解析布尔值
+    /**
+     * @brief 辅助函数：解析布尔值
+     * Helper function: Parse boolean value
+     * @param jsonStr JSON字符串
+     * @param pos 当前解析位置
+     * @return 解析后的布尔值
+     */
     static bool parseBoolean(const std::string& jsonStr, size_t& pos) {
         if (jsonStr.substr(pos, 4) == "true") {
             pos += 4;
@@ -297,7 +336,12 @@ private:
         }
     }
 
-// 辅助函数：解析null
+    /**
+     * @brief 辅助函数：解析null值
+     * Helper function: Parse null value
+     * @param jsonStr JSON字符串
+     * @param pos 当前解析位置
+     */
     static void parseNull(const std::string& jsonStr, size_t& pos) {
         if (jsonStr.substr(pos, 4) != "null") {
             throw std::invalid_argument("Invalid JSON null value");
@@ -305,7 +349,13 @@ private:
         pos += 4;
     }
 
-// 辅助函数：解析对象（键值对集合）
+    /**
+     * @brief 辅助函数：解析对象（键值对集合）
+     * Helper function: Parse object (key-value pair collection)
+     * @param jsonStr JSON字符串
+     * @param pos 当前解析位置
+     * @return 解析后的对象映射
+     */
     static std::map<std::string, JsonValue> parseObject(const std::string& jsonStr, size_t& pos) {
         pos++; // 跳过开头的 {
         std::map<std::string, JsonValue> obj;
@@ -347,7 +397,13 @@ private:
         return obj;
     }
 
-// 辅助函数：解析数组（值列表）
+    /**
+     * @brief 辅助函数：解析数组（值列表）
+     * Helper function: Parse array (value list)
+     * @param jsonStr JSON字符串
+     * @param pos 当前解析位置
+     * @return 解析后的数组
+     */
     static std::vector<JsonValue> parseArray(const std::string& jsonStr, size_t& pos) {
         pos++; // 跳过开头的 [
         std::vector<JsonValue> arr;
@@ -375,7 +431,13 @@ private:
         return arr;
     }
 
-    // 递归解析JSON值
+    /**
+     * @brief 递归解析JSON值
+     * Recursively parse JSON value
+     * @param jsonStr JSON字符串
+     * @param pos 当前解析位置
+     * @return 解析后的JsonValue对象
+     */
     static JsonValue parseValue(const std::string& jsonStr, size_t& pos) {
         pos = skipWhitespace(jsonStr, pos);
         if (pos >= jsonStr.size()) {
@@ -402,12 +464,28 @@ private:
  * @param obj 包含JsonValue的map
  * @return JSON格式的字符串
  */
+/**
+ * @brief 便捷函数：将嵌套map转换为JSON字符串
+ * Convenience function: Convert nested map to JSON string
+ * @param obj 包含JsonValue的map
+ * Map containing JsonValue
+ * @return JSON格式的字符串
+ * JSON formatted string
+ */
 std::string toJson(const std::map<std::string, JsonValue>& obj);
 
 /**
  * @brief 便捷函数：将vector<map>转换为JSON数组字符串
  * @param vec map数组
  * @return JSON数组格式的字符串
+ */
+/**
+ * @brief 便捷函数：将vector<map>转换为JSON数组字符串
+ * Convenience function: Convert vector<map> to JSON array string
+ * @param vec map数组
+ * Map array
+ * @return JSON数组格式的字符串
+ * JSON array formatted string
  */
 std::string toJsonArray(const std::vector<std::map<std::string, std::string>>& vec);
 

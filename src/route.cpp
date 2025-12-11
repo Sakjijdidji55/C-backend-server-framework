@@ -15,8 +15,8 @@ void registerRoutes(Server &app) {
         res.json(R"({"message":"Welcome to C++ Server"})");
     });
 
-    app.post("/", [](const Request& req, Response& res) {
-        req.show();
-        res.success(req.bodyParams);
+    app.post("/", [](const Request& /*req*/, Response& res) {
+//        req.show();
+        res.success();
     });
 }

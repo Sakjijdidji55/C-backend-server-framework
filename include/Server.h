@@ -23,6 +23,8 @@
 #ifdef _WIN32
 #include <winsock2.h>    // Windows平台网络头文件 (Windows platform network header)
 #include <windows.h>
+#include <fstream>
+
 #else
 #include <sys/socket.h>  // Linux/Unix平台网络头文件 (Linux/Unix platform network header)
 #include <netinet/in.h>  // 包含sockaddr_in定义 (Contains sockaddr_in definition)
@@ -491,6 +493,7 @@ struct Response {
     void json(const std::string& jsonStr) {
         body = jsonStr;
         headers["Content-Type"] = "application/json; charset=utf-8";
+        Log::getInstance()->write("Time "+getFormattedDate()+ " Code: " + std::to_string(statusCode) +" Response: " + jsonStr + "\n");
     }
     
     /**
@@ -502,6 +505,7 @@ struct Response {
     void text(const std::string& textStr) {
         body = textStr;
         headers["Content-Type"] = "text/plain; charset=utf-8";
+        Log::getInstance()->write("Time "+getFormattedDate()+ " Code: " + std::to_string(statusCode) +" Response: " + textStr + "\n");
     }
 
     /**
@@ -525,6 +529,7 @@ struct Response {
         result["status"] = "ok";
         result["message"] = "Success";
         json(mpToJson(result));
+        Log::getInstance()->write("Time "+getFormattedDate()+ " Code: " + std::to_string(statusCode) +" Response: " + mpToJson(result) + "\n");
     }
 
     // 新版：支持嵌套JSON结构的success方法
@@ -537,16 +542,93 @@ struct Response {
             result[pair.first] = pair.second;
         }
         json(toJson(result));
+        Log::getInstance()->write("Time "+getFormattedDate()+ " Code: " + std::to_string(statusCode) +" Response: " + toJson(result) + "\n");
     }
 
     void success() {
         json(R"({"status":"ok", "message":"Success"})");
+        Log::getInstance()->write("Time "+getFormattedDate()+ " Code: " + std::to_string(statusCode) +" Response: " + R"({"status":"ok", "message":"Success"})" + "\n");
     }
 
     void error(int code, const std::string& message) {
-        Log::getInstance()->write("Time "+getFormattedDate()+" Code "+std::to_string(code)+" Error: " + message + "\n");
         statusCode = code;
         json(R"({"status":"fail", "message":")" + message + "\"}");
+        Log::getInstance()->write("Time "+getFormattedDate()+" Code "+std::to_string(code)+" Error: " + message + "\n");
+    }
+
+    /**
+     * 传输二进制文件数据（优化版：自动处理文件名和后缀）
+     * @param filePath 本地文件路径
+     * @param mimeType 文件MIME类型（如image/png、application/octet-stream）
+     * @param isAttachment 是否作为附件下载（true=触发下载，false=浏览器内展示）
+     * @param customFileName 自定义下载文件名（为空则使用原文件名称）
+     */
+    void file(const std::string& filePath,
+              const std::string& mimeType = "application/octet-stream",
+              bool isAttachment = true,
+              const std::string& customFileName = "") {
+        try {
+            // 1. 以二进制模式打开文件
+            std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+            if (!file.is_open()) {
+                error(404, "File not found: " + filePath); // 修正：文件不存在应返回404而非400
+                return;
+            }
+
+            // 2. 获取文件大小并分配缓冲区
+            std::streamsize fileSize = file.tellg();
+            if (fileSize <= 0) {
+                file.close();
+                error(400, "File is empty: " + filePath);
+                return;
+            }
+            file.seekg(0, std::ios::beg);
+
+            // 3. 读取二进制数据到body
+            body.resize(fileSize);
+            if (!file.read(&body[0], fileSize)) {
+                file.close();
+                error(500, "Failed to read file: " + filePath);
+                return;
+            }
+            file.close();
+
+            // 4. 核心：处理文件名和后缀，设置响应头
+            statusCode = 200;
+            headers["Content-Type"] = mimeType;                  // 设置MIME类型
+            headers["Content-Length"] = std::to_string(fileSize); // 设置数据长度
+            headers["Content-Transfer-Encoding"] = "binary";     // 声明二进制传输
+
+            // 关键：获取文件名（包含后缀），告诉浏览器文件类型
+            std::string fileName = customFileName.empty() ? getFileNameWithExt(filePath) : customFileName;
+
+            // 设置Content-Disposition，明确告诉浏览器文件名和后缀
+            if (isAttachment) {
+                // 触发下载（浏览器会保存文件，文件名带后缀）
+                headers["Content-Disposition"] = "attachment; filename=\"" + fileName + "\"";
+            } else {
+                // 浏览器内展示（如图片直接显示，仍保留文件名标识）
+                headers["Content-Disposition"] = "inline; filename=\"" + fileName + "\"";
+            }
+
+            Log::getInstance()->write("Time "+getFormattedDate()+ " Code: " + std::to_string(statusCode) +" Response: " + fileName + "\n");
+
+        } catch (const std::exception& e) {
+            error(500, "File transfer error: " + std::string(e.what()));
+        }
+    }
+
+    // 辅助方法：从文件路径中提取带后缀的完整文件名
+    static std::string getFileNameWithExt(const std::string& filePath) {
+        // 处理 Windows(\) 和 Linux/Mac(/) 路径分隔符
+        size_t lastSlash = filePath.find_last_of("/\\");
+        std::string fileName = (lastSlash == std::string::npos) ? filePath : filePath.substr(lastSlash + 1);
+
+        // 确保文件名非空（防止路径以分隔符结尾）
+        if (fileName.empty()) {
+            fileName = "unknown_file";
+        }
+        return fileName;
     }
 };
 

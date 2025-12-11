@@ -16,6 +16,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)  # 核心：exe输�
 set(MYSQL_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mysql/include)
 set(MYSQL_LIB_FILE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mysql/lib/libmysql.lib)
 set(MYSQL_DLL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mysql/lib/libmysql.dll)
+set(REDIS_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/redis/include)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/redis/include)
+link_directories(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/redis/lib)
 
 # 检查文件是否存在（仅Windows下检查，Linux使用系统库）
 if(WIN32)
@@ -47,6 +51,7 @@ target_include_directories(${PROJECT_NAME}
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${MYSQL_INCLUDE_DIR}
+        ${REDIS_INCLUDE_DIR}
 )
 
 # -------------------------- 跨平台依赖查找（核心修复） --------------------------
@@ -65,17 +70,18 @@ endif()
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE
             /W4 /WX /permissive- $<$<CONFIG:Debug>:/ZI>
+            /wd4200  # MSVC下屏蔽柔性数组警告（C4200号警告）
     )
     target_link_options(${PROJECT_NAME} PRIVATE
             $<$<CONFIG:Debug>:/INCREMENTAL>
     )
 else()
-    # GCC/Clang/MinGW编译器
+    # GCC/Clang/MinGW编译器（兼容所有版本，移除无效警告选项）
     target_compile_options(${PROJECT_NAME} PRIVATE
             -Wall                   # 基本警告
             -Wextra                 # 额外警告
-            -Werror                 # 警告视为错误
-            -pedantic               # 严格遵循C++标准
+            -Wno-pedantic           # 仅关闭pedantic严格检查（解决柔性数组报错，兼容所有MinGW版本）
+            -Werror                 # 警告视为错误（保留其他警告的严格性）
             -g                      # 调试信息
             $<$<CONFIG:Release>:-O2> # 发布模式优化
             -static-libstdc++       # 静态链接C++标准库（核心：摆脱libstdc++-6.dll依赖）

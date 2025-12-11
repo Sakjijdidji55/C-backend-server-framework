@@ -558,7 +558,7 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
     // 将接收到的数据转换为字符串
     std::string requestStr(buffer, bytesRead);
 
-    Log::getInstance()->write(getFormattedDate()+" "+getClientIP(clientAddress)+" "+requestStr);
+    Log::getInstance()->write(getFormattedDate()+" "+getClientIP(clientAddress));
 
     // 解析HTTP请求
     Request request = parseRequest(requestStr);
@@ -608,8 +608,8 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
             first = false;
         }
     }
-    std::cout << " HTTP/1.1\" " << response.statusCode << " " 
-              << response.body.length();
+    std::cout << " HTTP/1.1\" Code: " << response.statusCode << " BodyLen: "
+              << response.body.length() << " CostTime: ";
 
     std::time_t end_time = std::time(nullptr);
     long long end_timestamp = static_cast<long long>(end_time) * 1000;
@@ -624,7 +624,7 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
  * @return 解析后的Request对象
  */
 Request Server::parseRequest(const std::string& requestStr) {
-    std::cout<<"requestStr: "<<requestStr.size()<<std::endl;
+//    std::cout<<"requestStr: "<<requestStr.size()<<std::endl;
     // 创建Request对象和字符串流
     Request request;
     std::istringstream iss(requestStr);
@@ -682,7 +682,7 @@ Request Server::parseRequest(const std::string& requestStr) {
     request.body = body;
     request.parseBody();
 
-    std::cout<<"request.body: "<<request.body.size()<<std::endl;
+//    std::cout<<"request.body: "<<request.body.size()<<std::endl;
 
     return request;
 }

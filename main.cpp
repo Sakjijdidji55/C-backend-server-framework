@@ -12,7 +12,8 @@
 #include "include/Server.h"
 #include "include/route.h"
 #include "include/DBConnector.h"
-
+//#include <hiredis/hiredis.h>
+#include "RDConnector.h"
 /**
  * @brief 程序主入口函数
  * @brief Main entry function of the program
@@ -43,17 +44,17 @@ int main() {
 
     // 初始化数据库连接器单例实例
     // Initialize database connector singleton instance
-    DBConnector::initInstance(
-            "localhost",    // 主机 Host
-            "root",         // 用户名 Username
-            "5define7eS",     // 替换为实际密码 Replace with actual password
-            "flight_qt_server", // 数据库名 Database name
-            3306            // 端口 Port
-    );
+//    DBConnector::initInstance(
+//            "localhost",    // 主机 Host
+//            "root",         // 用户名 Username
+//            "password",     // 替换为实际密码 Replace with actual password
+//            "name", // 数据库名 Database name
+//            3306            // 端口 Port
+//    );
 
-    // 创建服务器实例，指定监听端口1437
-    // Create server instance, specifying port 1437 for listening
-    Server app(std::stoi("1437"));
+    // 创建服务器实例，指定监听端口8080
+    // Create server instance, specifying port 8080 for listening
+    Server app(std::stoi("8080"));
 
     // 注册所有路由处理函数
     // Register all route handlers

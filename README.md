@@ -13,6 +13,7 @@ This is a lightweight HTTP server implemented in C++, providing complete web ser
 
 - **HTTP服务器核心**：支持HTTP/1.1协议，处理GET、POST、PUT、DELETE等请求方法
 - **数据库连接**：基于MySQL的数据库访问接口，实现单例模式
+- **缓存功能**：基于Redis的高性能缓存服务，支持基本的数据操作
 - **JSON处理**：支持JSON解析和序列化
 - **JWT认证**：实现基于HS256算法的JWT令牌生成和验证
 - **线程池**：多线程处理请求，提高并发性能
@@ -21,6 +22,7 @@ This is a lightweight HTTP server implemented in C++, providing complete web ser
 
 - **HTTP Server Core**: Supports HTTP/1.1 protocol, handling GET, POST, PUT, DELETE and other request methods
 - **Database Connection**: MySQL-based database access interface, implemented with singleton pattern
+- **Cache Functionality**: Redis-based high-performance caching service supporting basic data operations
 - **JSON Processing**: Supports JSON parsing and serialization
 - **JWT Authentication**: Implements JWT token generation and verification based on HS256 algorithm
 - **Thread Pool**: Multi-threaded request handling for improved concurrent performance
@@ -33,11 +35,13 @@ This is a lightweight HTTP server implemented in C++, providing complete web ser
 - C++17 或更高版本
 - CMake 3.10 或更高版本
 - MySQL 客户端库
+- Redis 客户端库 (hiredis)
 - Windows 或 Linux 操作系统
 
 - C++17 or higher
 - CMake 3.10 or higher
 - MySQL client library
+- Redis client library (hiredis)
 - Windows or Linux operating system
 
 ## 目录结构
@@ -52,6 +56,7 @@ c++Server/
 ├── src/              # 源代码文件
 │   ├── Server.cpp    # HTTP服务器实现
 │   ├── DBConnector.cpp # 数据库连接器
+│   ├── RDConnector.cpp # Redis缓存连接器
 │   ├── JsonValue.cpp  # JSON处理
 │   ├── Log.cpp       # 日志系统
 │   ├── Threadpool.cpp # 线程池实现
@@ -113,11 +118,98 @@ c++Server.exe  # Windows
 
 - 默认端口：8080
 - 默认数据库地址：localhost:3306
+- 默认Redis地址：localhost:6379
 - 默认日志文件：server.log
 
 - Default port: 8080
 - Default database address: localhost:3306
+- Default Redis address: localhost:6379
 - Default log file: server.log
+
+## 数据库与缓存
+## Database and Cache
+
+### MySQL数据库连接
+### MySQL Database Connection
+
+数据库连接器(`DBConnector`)提供了与MySQL数据库交互的功能，采用单例模式实现：
+
+```cpp
+// 获取数据库连接器单例
+DBConnector* db = DBConnector::getInstance();
+
+// 连接数据库
+bool connected = db->connect("localhost", "3306", "user", "password", "database");
+
+// 执行查询
+std::vector<std::map<std::string, std::string>> result = db->query("SELECT * FROM users");
+```
+
+The database connector (`DBConnector`) provides functionality for interacting with MySQL database, implemented with singleton pattern:
+
+```cpp
+// Get database connector singleton
+DBConnector* db = DBConnector::getInstance();
+
+// Connect to database
+bool connected = db->connect("localhost", "3306", "user", "password", "database");
+
+// Execute query
+std::vector<std::map<std::string, std::string>> result = db->query("SELECT * FROM users");
+```
+
+### Redis缓存操作
+### Redis Cache Operations
+
+Redis缓存连接器(`RdConnector`)提供了与Redis缓存服务器交互的功能，支持基本的数据操作：
+
+```cpp
+// 获取Redis连接器单例
+RdConnector* redis = RdConnector::getInstance();
+
+// 连接Redis服务器
+bool connected = redis->connect("localhost", "6379", "", 0);
+
+// 设置键值对
+redis->set("key", "value");
+
+// 设置带过期时间的键值对
+redis->set("key", "value", 3600);  // 1小时后过期
+
+// 获取键值
+std::string value = redis->get("key");
+
+// 检查键是否存在
+bool exists = redis->exists("key");
+
+// 删除键
+bool deleted = redis->del("key");
+```
+
+The Redis cache connector (`RdConnector`) provides functionality for interacting with Redis cache server, supporting basic data operations:
+
+```cpp
+// Get Redis connector singleton
+RdConnector* redis = RdConnector::getInstance();
+
+// Connect to Redis server
+bool connected = redis->connect("localhost", "6379", "", 0);
+
+// Set key-value pair
+redis->set("key", "value");
+
+// Set key-value pair with expiration
+redis->set("key", "value", 3600);  // Expires after 1 hour
+
+// Get key value
+std::string value = redis->get("key");
+
+// Check if key exists
+bool exists = redis->exists("key");
+
+// Delete key
+bool deleted = redis->del("key");
+```
 
 ## API 示例
 ## API Examples
