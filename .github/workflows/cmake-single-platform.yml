@@ -13,28 +13,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      # 直接硬编码版本，避免早期解析阶段的变量引用问题
       image: ubuntu:noble
       options: --user root
-    # 若需使用变量，可在此处定义job级别的env（可选）
-    # env:
-    #   UBUNTU_VERSION: noble
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies (MariaDB + Redis)
         run: |
-          # 配置基础源
-          echo "deb http://archive.ubuntu.com/ubuntu noble main universe restricted multiverse" > /etc/apt/sources.list
-          echo "deb http://archive.ubuntu.com/ubuntu noble-updates main universe restricted multiverse" >> /etc/apt/sources.list
-          echo "deb http://archive.ubuntu.com/ubuntu noble-security main universe restricted multiverse" >> /etc/apt/sources.list
-
+          # 清理并更新源（避免重复配置警告）
+          rm -f /etc/apt/sources.list.d/ubuntu.sources  # 删除冲突的源配置
           apt clean
           apt update -y --fix-missing
+          
+          # 安装依赖
           apt install -y libmariadb-dev libhiredis-dev libssl-dev zlib1g-dev cmake g++ make
-
-          # 软链接与验证步骤（保持不变）
+          
+          # 创建软链接
           if [ -f "/usr/lib/x86_64-linux-gnu/libmariadb.so" ]; then
             ln -sf /usr/lib/x86_64-linux-gnu/libmariadb.so /usr/lib/x86_64-linux-gnu/libmysqlclient.so
           else
@@ -47,13 +42,15 @@ jobs:
             echo "错误：MariaDB头文件目录不存在" && exit 1
           fi
 
+          # 验证依赖（适配MariaDB的宏定义）
           echo "=== 验证依赖版本 ==="
           g++ --version || { echo "g++未安装"; exit 1; }
           cmake --version || { echo "cmake未安装"; exit 1; }
           
           echo "=== 验证MySQL/MariaDB ==="
           ls -l /usr/lib/x86_64-linux-gnu/libmysqlclient.so || { echo "MySQL链接失败"; exit 1; }
-          grep -q "MYSQL_VERSION" /usr/include/mysql/mysql.h || { echo "MySQL头文件无效"; exit 1; }
+          # 检查MariaDB特有的版本宏，适配MariaDB头文件
+          grep -q "MARIADB_VERSION" /usr/include/mysql/mysql.h || { echo "MariaDB头文件无效"; exit 1; }
           
           echo "=== 验证Redis ==="
           ls -l /usr/lib/x86_64-linux-gnu/libhiredis.so || { echo "Redis库失败"; exit 1; }
