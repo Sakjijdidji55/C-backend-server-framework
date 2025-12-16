@@ -56,23 +56,86 @@ endif()
 add_executable(${PROJECT_NAME} ${INCLUDE_FILES} ${SRC_FILES} ${MODELS_FILES})
 
 # ===================== 移动到此处：编译器/平台宏定义（核心修正） =====================
+# 编译器/平台宏定义 + 编译选项配置（跨平台兼容）
 if(MSVC)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_MSVC=1)
-    target_compile_options(${PROJECT_NAME} PRIVATE /Zi /EHsc)
-    target_link_options(${PROJECT_NAME} PRIVATE /DEBUG)
+    # Visual Studio 编译器
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+            COMPILER_MSVC=1          # 标识MSVC编译器
+            _MSC_VER=${MSVC_VERSION} # 传递MSVC版本号（可选，便于代码中判断版本）
+            NOMINMAX=1               # 禁用MSVC的min/max宏（避免和std::min/max冲突）
+            _CRT_SECURE_NO_WARNINGS=1 # 屏蔽C标准库安全警告（如sprintf_s）
+    )
+    target_compile_options(${PROJECT_NAME} PRIVATE
+            /Zi           # 生成调试信息
+            /EHsc         # 启用C++异常处理（仅捕获C++异常，忽略C异常）
+            /W4           # 最高警告级别
+            /WX           # 警告视为错误（严格编译）
+            /permissive-  # 禁用非标准扩展（强制标准C++）
+            /wd4200       # 屏蔽柔性数组警告（C4200，按需添加）
+    )
+    target_link_options(${PROJECT_NAME} PRIVATE
+            /DEBUG        # 链接时生成调试信息
+            /INCREMENTAL:NO # 禁用增量链接（发布模式更稳定）
+    )
 elseif(MINGW)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_MINGW=1)
-    # 移除 -fno-exceptions（保留异常支持），仅保留必要选项
-    target_compile_options(${PROJECT_NAME} PRIVATE -fexceptions) # 显式启用异常
+    # MinGW/GCC（Windows下）
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+            COMPILER_MINGW=1  # 标识MinGW
+            COMPILER_GCC=1    # 补充GCC宏（关键：代码中可统一判断GCC分支）
+            _WIN32=1          # 强制标识Windows平台
+    )
+    target_compile_options(${PROJECT_NAME} PRIVATE
+            -fexceptions      # 显式启用异常（MinGW默认启用，显式声明更清晰）
+            -Wall             # 基本警告
+            -Wextra           # 额外警告
+            -Wno-pedantic     # 屏蔽pedantic严格检查（兼容柔性数组等写法）
+            -Werror           # 警告视为错误
+            -g                # 生成调试信息
+            -static-libstdc++ # 静态链接C++标准库（避免依赖libstdc++-6.dll）
+            -static-libgcc    # 静态链接GCC运行时（避免依赖libgcc_s_seh-1.dll）
+    )
+    target_link_options(${PROJECT_NAME} PRIVATE
+            -static-libstdc++
+            -static-libgcc
+            -Wl,--disable-auto-import # 禁用自动导入（MinGW链接优化）
+    )
 elseif(UNIX)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_LINUX=1)
+    # Linux/macOS（Unix类系统）
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+            COMPILER_LINUX=1   # 标识Linux（macOS可额外加COMPILER_MAC=1）
+            _POSIX_C_SOURCE=200809L # 启用POSIX标准（兼容execinfo.h等头文件）
+    )
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_CLANG=1)
+        # Clang编译器（Linux/macOS）
+        target_compile_definitions(${PROJECT_NAME} PRIVATE
+                COMPILER_CLANG=1
+                __clang__=1 # 兜底：确保代码中__clang__宏可用（如需）
+        )
+        target_compile_options(${PROJECT_NAME} PRIVATE
+                -Wall -Wextra -Werror -g
+                -rdynamic      # 导出符号表（崩溃回溯时能解析函数名）
+                -fexceptions   # 启用异常
+                -Wno-unused-parameter # 按需屏蔽无关警告
+        )
     else()
-        target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_GCC=1)
+        # GCC编译器（Linux）
+        target_compile_definitions(${PROJECT_NAME} PRIVATE
+                COMPILER_GCC=1
+                __GNUC__=1    # 兜底：确保代码中__GNUC__宏可用（如需）
+        )
+        target_compile_options(${PROJECT_NAME} PRIVATE
+                -Wall -Wextra -Werror -g
+                -rdynamic      # 关键：Linux崩溃回溯必须的编译选项
+                -fexceptions   # 启用异常
+                -Wno-pedantic  # 兼容非严格标准写法
+        )
     endif()
+    # Unix通用链接选项
+    target_link_options(${PROJECT_NAME} PRIVATE
+            -rdynamic  # 导出符号表（与编译选项配合）
+            -pthread   # 启用线程支持（Linux下必需）
+    )
 endif()
-
 # 包含头文件目录（相对路径）
 target_include_directories(${PROJECT_NAME}
         PRIVATE

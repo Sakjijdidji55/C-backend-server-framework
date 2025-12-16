@@ -275,15 +275,24 @@ void CrashHandler::printCrashInfo(int sig, const std::string& reason) {
         if (logFile.is_open()) {
             logFile << "[" << formatCurrentTime() << "] "
                     << "ExitCode: " << sig << ", Reason: " << reason << "\n";
+
+            // 编译器类型判断：全条件编译，无直接宏引用
 #if defined(COMPILER_MSVC)
             logFile << "  Compiler: MSVC\n";
 #elif defined(COMPILER_MINGW)
             logFile << "  Compiler: MinGW\n";
-#elif defined(COMPILER_LINUX)
-            logFile << "  Compiler: " << (__clang__ ? "Clang" : "GCC") << "\n";
+#elif defined(COMPILER_CLANG)  // 直接用CMake定义的CLANG宏，避免__clang__未定义
+            logFile << "  Compiler: Clang\n";
+#elif defined(COMPILER_GCC)    // 直接用CMake定义的GCC宏
+        logFile << "  Compiler: GCC\n";
+#else  // 兜底：未知编译器
+        logFile << "  Compiler: Unknown\n";
 #endif
+
             logFile << "----------------------------------------\n";
             logFile.close();
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to write crash log: " << e.what() << std::endl;
+    }
 }
