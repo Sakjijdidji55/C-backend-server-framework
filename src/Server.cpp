@@ -918,10 +918,6 @@ Server* Server::getInstance() {
     return instance_;
 }
 
-BOOL WINAPI ConsoleCtrlHandler(DWORD /*dwCtrlType*/) {
-    return 0;
-}
-
 void Server::signalHandler(int /*sig*/) {
 
 }
