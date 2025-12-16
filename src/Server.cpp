@@ -114,8 +114,8 @@ void Server::registerSignalHandlers() {
     // Linux 捕获 SIGTERM（kill 命令）
         signal(SIGTERM, [](int sig) {
             std::cerr << "\nReceived signal " << sig << " (SIGTERM), exiting gracefully..." << std::endl;
-            if (g_pServer) {
-                g_pServer->running_ = false;
+            if (instance_) {
+                instance_->running_ = false;
             }
         });
 #endif
@@ -916,4 +916,12 @@ std::string Server::getClientIP(const sockaddr_in *clientAddress) {
 
 Server* Server::getInstance() {
     return instance_;
+}
+
+BOOL WINAPI ConsoleCtrlHandler(DWORD /*dwCtrlType*/) {
+    return 0;
+}
+
+void Server::signalHandler(int /*sig*/) {
+
 }
