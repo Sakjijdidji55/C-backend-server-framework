@@ -26,7 +26,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <eh.h>          // SEH异常
-#include <signal.h>      // Windows信号
+#include <csignal>      // Windows信号
 //#pragma comment(lib, "dbghelp.lib") // 崩溃回溯（可选）
 #else
 #include <signal.h>

@@ -7,15 +7,20 @@
 #include <iomanip>
 
 // 平台特有头文件
-#ifdef _WIN32
-#include <windows.h>
-#include <tlhelp32.h> // 必须包含，否则 MODULEENTRY32 等符号未定义
-#endif
 #include <iostream>
-#include <fstream>
 #include <string>
-#include <chrono>
-#include <dbghelp.h>
+
+// 平台特有头文件：严格隔离 Windows/Linux
+#ifdef _WIN32  // 仅 Windows 平台包含 Windows 专属头文件
+#include <windows.h>
+#include <tlhelp32.h> // MODULEENTRY32 依赖
+#include <dbghelp.h>  // Windows 调试帮助库（仅 Windows 可见）
+#else  // Linux/Mac 平台：替换为系统原生调试接口
+#include <execinfo.h>  // backtrace/backtrace_symbols
+#include <signal.h>    // 信号处理（捕获崩溃）
+#include <unistd.h>    // POSIX 系统调用
+#include <stdlib.h>    // exit/free
+#endif
 
 // 初始化崩溃处理
 void CrashHandler::init(const CleanupCallback& cleanupFunc) {
