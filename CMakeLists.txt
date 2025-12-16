@@ -55,6 +55,24 @@ endif()
 # 创建可执行文件（修正：移除重复的DBConnector文件指定，GLOB已包含）
 add_executable(${PROJECT_NAME} ${INCLUDE_FILES} ${SRC_FILES} ${MODELS_FILES})
 
+# ===================== 移动到此处：编译器/平台宏定义（核心修正） =====================
+if(MSVC)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_MSVC=1)
+    target_compile_options(${PROJECT_NAME} PRIVATE /Zi /EHsc)
+    target_link_options(${PROJECT_NAME} PRIVATE /DEBUG)
+elseif(MINGW)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_MINGW=1)
+    # 移除 -fno-exceptions（保留异常支持），仅保留必要选项
+    target_compile_options(${PROJECT_NAME} PRIVATE -fexceptions) # 显式启用异常
+elseif(UNIX)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_LINUX=1)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_CLANG=1)
+    else()
+        target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_GCC=1)
+    endif()
+endif()
+
 # 包含头文件目录（相对路径）
 target_include_directories(${PROJECT_NAME}
         PRIVATE
@@ -103,6 +121,7 @@ else()
             -static-libstdc++
             -static-libgcc
             $<$<BOOL:${WIN32}>:-static> # 仅Windows下全静态链接，Linux保留动态链接glibc
+            $<$<BOOL:${UNIX}>:-rdynamic> # 仅添加：Linux崩溃回溯需要的符号表导出
     )
 endif()
 
@@ -127,6 +146,9 @@ if(WIN32)
             mswsock         # 补充Redis依赖的扩展网络库
             wsock32         # 兼容旧版Socket
             iphlpapi        # 网络辅助库
+
+            # 仅添加：崩溃处理所需的dbghelp库
+            dbghelp
 
             # 其他系统库
             kernel32
@@ -163,11 +185,22 @@ install(DIRECTORY include/ DESTINATION include/${PROJECT_NAME})
 
 enable_testing()
 
-# 打印配置信息（补充Redis相关）
+# 打印配置信息（补充Redis相关 + 新增编译器信息）
 message(STATUS "======================================")
 message(STATUS "项目名称: ${PROJECT_NAME}")
 message(STATUS "C++标准: ${CMAKE_CXX_STANDARD}")
 message(STATUS "系统平台: ${CMAKE_SYSTEM_NAME}")
+if(MSVC)
+    message(STATUS "编译器: MSVC (${CMAKE_CXX_COMPILER_VERSION})")
+elseif(MINGW)
+    message(STATUS "编译器: MinGW/GCC (${CMAKE_CXX_COMPILER_VERSION})")
+elseif(UNIX)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(STATUS "编译器: Clang (${CMAKE_CXX_COMPILER_VERSION})")
+    else()
+        message(STATUS "编译器: GCC (${CMAKE_CXX_COMPILER_VERSION})")
+    endif()
+endif()
 message(STATUS "MySQL头文件路径(相对): ${MYSQL_INCLUDE_DIR}")
 if(WIN32)
     message(STATUS "MySQL库文件路径(相对): ${MYSQL_LIB_FILE}")

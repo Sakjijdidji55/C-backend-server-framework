@@ -726,6 +726,7 @@ private:
     int serverSocket_;                    ///< 服务器套接字 (Server socket)
     bool running_;                        ///< 服务器运行状态 (Server running status)
     bool LogParams;                       ///< 是否记录参数 (Whether to log parameters)
+    std::mutex mutex_;
     std::mutex routesMutex_;              ///< 路由表互斥锁 (Routes mutex lock)
     std::mutex logMutex_;                 ///< 日志互斥锁 (Log mutex lock)
     ThreadPool threadpool_;               ///< 线程池 (Thread pool)
@@ -779,6 +780,8 @@ private:
     void listenIPv6(int serverSocketIPv6);
 
     static std::string getLanIpv6();
+
+    void cleanup();
 };
 
 #endif // SERVER_H

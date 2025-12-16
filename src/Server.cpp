@@ -9,6 +9,7 @@
  * providing core functionalities such as routing management, request handling, and response generation.
  */
 #include "../include/Server.h"
+#include "Crash.h"
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -87,52 +88,66 @@ Server* Server::instance_ = nullptr;
  */
 Server::Server(int port, bool printParams) : port_(port),serverSocket_(-1), running_(false), LogParams(printParams), threadpool_(std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 1) {
     instance_ = this;
-    registerSignalHandlers(); // 注册信号处理函数
-                           // Register signal handlers
+    CrashHandler::instance().init([this]() { this->cleanup(); });
+    registerSignalHandlers();
 }
 
-void Server::signalHandler(int /*sig*/) {
-    std::cout << "\nShutting down server..." << std::endl;
-    if (instance_) {
-        instance_->stop();
-    }
-    exit(0);
-}
-
-#ifdef _WIN32
-// Windows控制台关闭事件处理函数
-BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
-    if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_CLOSE_EVENT || 
-        dwCtrlType == CTRL_BREAK_EVENT) {
-        if (Server::instance_) {
-            std::cout << "\nShutting down server..." << std::endl;
-            Server::instance_->stop();
-        }
-        return TRUE;
-    }
-    return FALSE;
-}
-#endif
-
-/**
- * @brief 注册信号处理函数，用于处理程序终止信号
- * @brief Register signal handlers for program termination signals
- * @note 根据不同操作系统平台设置相应的信号处理机制
- * @note Configure appropriate signal handling mechanisms based on different operating systems
- * @warning 此函数在服务器启动前自动调用，无需手动调用
- * @warning This function is automatically called before server startup, no need to call manually
- */
 void Server::registerSignalHandlers() {
+    // 捕获 Ctrl+C（SIGINT）和进程终止（SIGTERM）
+    signal(SIGINT, [](int sig) {
+        std::cerr << "\nReceived signal " << sig << " (Ctrl+C), exiting gracefully..." << std::endl;
+        // 通知全局 Server 实例退出（需将 Server 实例设为全局/单例）
+        if (instance_) {
+            instance_->running_ = false; // 退出主循环
+        }
+    });
+
 #ifdef _WIN32
-    // Windows上使用SetConsoleCtrlHandler处理控制台关闭事件
-    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
-    signal(SIGINT, signalHandler);
-    signal(SIGTERM, signalHandler);
+    // Windows 额外捕获 Ctrl+Break
+    signal(SIGBREAK, [](int sig) {
+        std::cerr << "\nReceived signal " << sig << " (Ctrl+Break), exiting gracefully..." << std::endl;
+        if (instance_) {
+            instance_->running_ = false;
+        }
+    });
 #else
-    // Linux/Unix上信号处理正常工作
-    signal(SIGINT, signalHandler);
-    signal(SIGTERM, signalHandler);
+    // Linux 捕获 SIGTERM（kill 命令）
+        signal(SIGTERM, [](int sig) {
+            std::cerr << "\nReceived signal " << sig << " (SIGTERM), exiting gracefully..." << std::endl;
+            if (g_pServer) {
+                g_pServer->running_ = false;
+            }
+        });
 #endif
+}
+// 核心清理逻辑（优雅退出时执行）
+void Server::cleanup() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::cerr << "\n=== Server cleanup start ===" << std::endl;
+
+    // 1. 停止主循环
+    running_ = false;
+
+    // 2. 关闭Socket
+    if (serverSocket_ >= 0) {
+#ifdef _WIN32
+        closesocket(serverSocket_);
+#else
+        close(serverSocket_);
+#endif
+        serverSocket_ = -1;
+        std::cerr << "Socket closed" << std::endl;
+    }
+
+    // 3. 停止线程池/工作线程
+    // threadPool_.shutdown();
+    std::cerr << "Thread pool shutdown" << std::endl;
+
+    // 4. 释放其他资源（数据库连接、文件句柄等）
+    // dbConn_.close();
+    std::cerr << "Database connection closed" << std::endl;
+
+    std::cerr << "=== Server cleanup end ===" << std::endl;
 }
 
 Server::~Server() {
@@ -323,6 +338,8 @@ void Server::run() {
         threadpool_.addTask(&Server::handleClient, this,
                             clientSocket, &clientAddress);
     }
+
+    cleanup();
 }
 
 void Server::listenIPv6(int serverSocketIPv6) {
