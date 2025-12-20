@@ -9,6 +9,7 @@
  * providing core functionalities such as routing management, request handling, and response generation.
  */
 #include "../include/Server.h"
+#include "../include/DuringTask.h"
 #include "Crash.h"
 #include <iostream>
 #include <sstream>
@@ -317,6 +318,8 @@ void Server::run() {
         std::cout << "  LAN IPv6:  http://["<< getLanIpv6() << "]:" << port_ << std::endl;
     }
     std::cout << "==========================================="<< std::endl;
+
+    threadpool_.addTask(&Server::doTaskRegular, this, 1000 * 60 * 30);
 
     // 主循环接受IPv4连接
     while (running_) {
@@ -920,4 +923,54 @@ Server* Server::getInstance() {
 
 void Server::signalHandler(int /*sig*/) {
 
+}
+
+void Server::doTaskRegular(long long during) const {
+    // 1. 参数合法性校验
+    if (during <= 0) {
+        std::cerr << "Error: during must be positive (current: " << during << ")" << std::endl;
+        return;
+    }
+
+    // 2. 简化时间戳获取：使用别名缩短代码
+    using namespace std::chrono;
+    milliseconds interval(during);
+    milliseconds sleep_interval(std::max(during / 10, 1LL)); // 最小休眠1ms，避免0ms空转
+
+    // 3. 初始时间戳（使用steady_clock避免系统时间修改导致的误差）
+    time_point<steady_clock> last_exec_time = steady_clock::now();
+
+    // 4. 定时任务主循环
+    while (running_) {
+        time_point<steady_clock> now = steady_clock::now();
+        // 计算距离上次执行的时间差
+        auto elapsed = duration_cast<milliseconds>(now - last_exec_time);
+
+        // 5. 达到间隔时间则执行任务
+        if (elapsed >= interval) {
+            try {
+                task(); // 捕获任务异常，避免主线程崩溃
+                last_exec_time = now; // 更新执行时间（基于当前时间，而非累加，避免漂移）
+            } catch (const std::exception& e) {
+                std::cerr << "Task execute failed: " << e.what() << std::endl;
+                last_exec_time = now; // 即使任务失败，仍更新时间（避免频繁重试）
+            } catch (...) {
+                std::cerr << "Task execute failed: unknown error" << std::endl;
+                last_exec_time = now;
+            }
+        }
+
+        // 6. 智能休眠：计算剩余时间，避免过度休眠/空转
+        // 剩余时间 = 间隔时间 - 已流逝时间
+        auto remaining = interval - elapsed;
+        if (remaining > sleep_interval) {
+            std::this_thread::sleep_for(sleep_interval);
+        } else if (remaining > milliseconds(0)) {
+            // 剩余时间不足sleep_interval时，休眠剩余时间，提升精度
+            std::this_thread::sleep_for(remaining);
+        }
+        // 剩余时间为负时，不休眠，直接进入下一轮检查
+    }
+
+    std::cout << "Regular task loop stopped" << std::endl;
 }

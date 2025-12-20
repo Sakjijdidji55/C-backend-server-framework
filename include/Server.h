@@ -782,6 +782,8 @@ private:
     static std::string getLanIpv6();
 
     void cleanup();
+
+    void doTaskRegular(long long int during) const;
 };
 
 #endif // SERVER_H
