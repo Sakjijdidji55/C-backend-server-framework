@@ -13,12 +13,12 @@
 #include <iostream>
 #include <iomanip>
 #include <ctime>
-#include <map>
-#include <vector>
 #include <sstream>
 #include <cstdio>
 #include "JsonValue.h"
 #include <fstream>
+#include <algorithm>
+#include <cstring>
 
 #ifdef _WIN32
 #include <winsock2.h>    // Windows平台网络头文件 (Windows platform network header)
@@ -42,6 +42,17 @@ std::string getFormattedDate();
 #include "JsonValue.h"
 
 /**
+ * @struct UploadedFile
+ * @brief 上传文件信息（multipart/form-data 文件字段）
+ */
+struct UploadedFile {
+    std::string name;        ///< 表单字段名
+    std::string filename;   ///< 原始文件名
+    std::string contentType; ///< MIME 类型，如 application/octet-stream
+    std::string data;        ///< 文件二进制数据（std::string 可安全存二进制）
+};
+
+/**
  * @struct Request
  * @brief HTTP请求结构体
  * @brief HTTP request structure
@@ -53,19 +64,42 @@ struct Request {
     std::string body;                        ///< 请求体 (Request body)
     std::map<std::string, std::string> queryParams;  ///< 查询参数 (Query parameters)
     std::map<std::string, JsonValue> bodyParams;   ///< 表单参数或JSON参数 (Form or JSON parameters)
+    std::map<std::string, UploadedFile> uploadedFiles; ///< 上传的文件（multipart 中带 filename 的 part）
     std::unique_ptr<JsonValue> jsonBody;            ///< 解析后的JSON对象（如果适用）(Parsed JSON object if applicable)
 
     /**
      * @brief 获取查询参数的值
      * @param key 查询参数名
      * @return 查询参数值，如果不存在则返回空字符串
-     * @brief Get the value of a query parameter
-     * @param key Query parameter name
-     * @return Query parameter value, or empty string if not exists
      */
     [[nodiscard]] std::string query_param(const std::string& key) const {
         auto it = queryParams.find(key);
         return it != queryParams.end() ? it->second : "";
+    }
+
+    /**
+     * @brief 获取请求体参数的值（表单或扁平化 JSON 键）
+     * @param key 参数名
+     * @return 字符串值，不存在则返回空字符串
+     */
+    [[nodiscard]] std::string body_param(const std::string& key) const {
+        auto it = bodyParams.find(key);
+        if (it == bodyParams.end()) return "";
+        const JsonValue& v = it->second;
+        if (v.getType() == JsonValue::STRING) return v.asString();
+        if (v.getType() == JsonValue::NUMBER) return std::to_string(v.asNumber());
+        if (v.getType() == JsonValue::BOOLEAN) return v.asBoolean() ? "true" : "false";
+        return v.toJson();
+    }
+
+    /**
+     * @brief 获取上传文件（multipart 中带 filename 的字段）
+     * @param key 表单字段名
+     * @return 指向 UploadedFile 的指针，不存在则返回 nullptr
+     */
+    [[nodiscard]] const UploadedFile* file(const std::string& key) const {
+        auto it = uploadedFiles.find(key);
+        return it != uploadedFiles.end() ? &it->second : nullptr;
     }
 
     /**
@@ -91,6 +125,12 @@ struct Request {
             std::cout << "Body Parameters (key-value):\n";
             for (const auto& [key, value] : bodyParams) {
                 std::cout << "  " << key << " = " << value.toJson() << "\n";
+            }
+        }
+        if (!uploadedFiles.empty()) {
+            std::cout << "Uploaded Files:\n";
+            for (const auto& [key, uf] : uploadedFiles) {
+                std::cout << "  " << key << " filename=" << uf.filename << " contentType=" << uf.contentType << " size=" << uf.data.size() << "\n";
             }
         }
     }
@@ -133,18 +173,14 @@ struct Request {
         } else if (contentType == "application/json") {
             parseJsonBody();
         } else if (contentType == "multipart/form-data") {
-            // 处理multipart/form-data（较复杂，需要边界）
-            std::cerr << "Warning: multipart/form-data parsing not fully implemented\n";
             parseMultipartFormData();
         } else if (contentType == "text/plain") {
-            // 纯文本，直接存储
             bodyParams["_raw_text"] = JsonValue(body);
+        } else if (contentType == "text/xml" || contentType == "application/xml") {
+            bodyParams["_raw_xml"] = JsonValue(body);
         } else if (contentType.empty()) {
-            // 没有Content-Type，尝试自动检测
             autoDetectContentType();
         } else {
-            // 未知类型，作为原始文本处理
-            std::cerr << "Warning: Unknown Content-Type: " << contentType << "\n";
             bodyParams["_raw_data"] = JsonValue(body);
         }
     }
@@ -214,9 +250,6 @@ private:
                 // URL解码
                 key = urlDecode(key);
                 value = urlDecode(value);
-
-                std::cout<<value.size()<<std::endl;
-
                 bodyParams[key] = JsonValue(value);
             } else {
                 // 只有key没有value的情况
@@ -356,32 +389,58 @@ private:
     }
 
     /**
-     * 解析multipart的单个part
+     * 解析multipart的单个part（支持普通字段与文件字段 filename）
      */
     void parseMultipartPart(const std::string& part) {
-        // 查找头部结束位置（空行）
         size_t headerEnd = part.find("\r\n\r\n");
+        size_t headerSkip = 4;
         if (headerEnd == std::string::npos) {
             headerEnd = part.find("\n\n");
-            if (headerEnd == std::string::npos) {
-                return;
-            }
+            headerSkip = 2;
+            if (headerEnd == std::string::npos) return;
         }
-
         std::string headersStr = part.substr(0, headerEnd);
-        std::string content = part.substr(headerEnd + 4); // 跳过空行
+        std::string content = part.substr(headerEnd + headerSkip);
+        // 去掉 part 末尾的 \r\n（边界前的换行）
+        while (!content.empty() && (content.back() == '\n' || content.back() == '\r'))
+            content.pop_back();
 
-        // 解析Content-Disposition获取name
         std::string name;
         size_t namePos = headersStr.find("name=\"");
         if (namePos != std::string::npos) {
             size_t nameEnd = headersStr.find('\"', namePos + 6);
-            if (nameEnd != std::string::npos) {
+            if (nameEnd != std::string::npos)
                 name = headersStr.substr(namePos + 6, nameEnd - namePos - 6);
-            }
         }
+        if (name.empty()) return;
 
-        if (!name.empty()) {
+        std::string filename;
+        size_t filenamePos = headersStr.find("filename=\"");
+        if (filenamePos != std::string::npos) {
+            size_t filenameEnd = headersStr.find('\"', filenamePos + 10);
+            if (filenameEnd != std::string::npos)
+                filename = headersStr.substr(filenamePos + 10, filenameEnd - filenamePos - 10);
+        }
+        if (!filename.empty()) {
+            UploadedFile uf;
+            uf.name = name;
+            uf.filename = filename;
+            uf.data = content;
+            uf.contentType = "application/octet-stream";
+            size_t ctPos = headersStr.find("Content-Type:");
+            if (ctPos != std::string::npos) {
+                ctPos = headersStr.find_first_not_of(" \t", ctPos + 12);
+                if (ctPos != std::string::npos) {
+                    size_t ctEnd = headersStr.find("\r\n", ctPos);
+                    if (ctEnd == std::string::npos) ctEnd = headersStr.find('\n', ctPos);
+                    if (ctEnd != std::string::npos)
+                        uf.contentType = headersStr.substr(ctPos, ctEnd - ctPos);
+                    else
+                        uf.contentType = headersStr.substr(ctPos);
+                }
+            }
+            uploadedFiles[name] = std::move(uf);
+        } else {
             bodyParams[name] = JsonValue(content);
         }
     }
@@ -475,11 +534,9 @@ struct Response {
     int statusCode = 200;                          ///< HTTP状态码 (HTTP status code)
     std::map<std::string, std::string> headers; ///< HTTP响应头 (HTTP response headers)
     std::string body;                              ///< 响应体 (Response body)
-    
-    /**
-     * @brief 构造函数，初始化默认响应头
-     * @brief Constructor, initializes default response headers
-     */
+    /// 流式写入器：若设置，buildResponse 只生成头部，body 由该回调向 clientSocket 写入
+    std::function<void(int clientSocket)> streamWriter;
+
     Response() {
         headers["Content-Type"] = "application/json; charset=utf-8";
     }
@@ -618,16 +675,60 @@ struct Response {
         }
     }
 
-    // 辅助方法：从文件路径中提取带后缀的完整文件名
+    /**
+     * 流式下载文件（分块读取并发送，适合大文件，不占用整文件内存）
+     * @param filePath 本地文件路径
+     * @param mimeType 文件MIME类型
+     * @param isAttachment 是否作为附件下载
+     * @param customFileName 自定义下载文件名（为空则使用原文件名）
+     * @param chunkSize 每次读取并发送的块大小（字节），默认 64KB
+     */
+    void fileStream(const std::string& filePath,
+                    const std::string& mimeType = "application/octet-stream",
+                    bool isAttachment = true,
+                    const std::string& customFileName = "",
+                    size_t chunkSize = 65536) {
+        std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            error(404, "File not found: " + filePath);
+            return;
+        }
+        std::streamsize fileSize = file.tellg();
+        if (fileSize <= 0) {
+            file.close();
+            error(400, "File is empty: " + filePath);
+            return;
+        }
+        file.close();
+        statusCode = 200;
+        headers["Content-Type"] = mimeType;
+        headers["Content-Length"] = std::to_string(fileSize);
+        headers["Content-Transfer-Encoding"] = "binary";
+        std::string fileName = customFileName.empty() ? getFileNameWithExt(filePath) : customFileName;
+        headers["Content-Disposition"] = isAttachment
+            ? ("attachment; filename=\"" + fileName + "\"")
+            : ("inline; filename=\"" + fileName + "\"");
+        body.clear();
+        streamWriter = [filePath, chunkSize](int clientSocket) {
+            std::ifstream f(filePath, std::ios::binary);
+            if (!f.is_open()) return;
+            std::vector<char> buf(chunkSize);
+            while (f.read(buf.data(), static_cast<std::streamsize>(chunkSize)) || f.gcount() > 0) {
+                auto n = f.gcount();
+#ifdef _WIN32
+                send(clientSocket, buf.data(), static_cast<int>(n), 0);
+#else
+                send(clientSocket, buf.data(), static_cast<size_t>(n), 0);
+#endif
+            }
+        };
+        Log::getInstance()->write("Time " + getFormattedDate() + " Code: " + std::to_string(statusCode) + " Stream: " + fileName + "\n");
+    }
+
     static std::string getFileNameWithExt(const std::string& filePath) {
-        // 处理 Windows(\) 和 Linux/Mac(/) 路径分隔符
         size_t lastSlash = filePath.find_last_of("/\\");
         std::string fileName = (lastSlash == std::string::npos) ? filePath : filePath.substr(lastSlash + 1);
-
-        // 确保文件名非空（防止路径以分隔符结尾）
-        if (fileName.empty()) {
-            fileName = "unknown_file";
-        }
+        if (fileName.empty()) fileName = "unknown_file";
         return fileName;
     }
 };

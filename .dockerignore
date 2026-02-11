@@ -1,0 +1,44 @@
+# 构建产物与缓存，避免进入镜像上下文
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+_deps/
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.exe
+*.out
+Makefile
+cmake_install.cmake
+install_manifest.txt
+
+# 版本控制与 IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+*.vcxproj*
+*.sln
+*.user
+
+# 文档与无关文件（可选，减小上下文）
+*.md
+!README.md
+.github/
+
+# 日志与本地配置
+logs/
+*.log
+config/local.*
+*.db
+tmp/
+temp/
+
+# Windows 专用（Docker 为 Linux 构建，可不传）
+*.dll
+*.pdb
+*.idb
+Thumbs.db

@@ -610,9 +610,14 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
         }
     }
     
-    // 构建响应字符串并发送给客户端
     std::string responseStr = buildResponse(response);
+#ifdef _WIN32
+    send(clientSocket, responseStr.c_str(), static_cast<int>(responseStr.length()), 0);
+#else
     send(clientSocket, responseStr.c_str(), responseStr.length(), 0);
+#endif
+    if (response.streamWriter)
+        response.streamWriter(clientSocket);
 
     // 打印访问日志（类似Apache/Nginx格式）
     std::string clientIP = getClientIP(clientAddress);
@@ -644,66 +649,55 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
  * @return 解析后的Request对象
  */
 Request Server::parseRequest(const std::string& requestStr) {
-//    std::cout<<"requestStr: "<<requestStr.size()<<std::endl;
-    // 创建Request对象和字符串流
     Request request;
-    std::istringstream iss(requestStr);
-    std::string line;
+    size_t he = requestStr.find("\r\n\r\n");
+    if (he == std::string::npos) he = requestStr.find("\n\n");
+    std::string headerPart = (he != std::string::npos) ? requestStr.substr(0, he) : requestStr;
+    std::string bodyPart;
+    if (he != std::string::npos) {
+        size_t bodyStart = he + ((he + 4 <= requestStr.size() && requestStr.compare(he, 4, "\r\n\r\n") == 0) ? 4u : 2u);
+        if (bodyStart <= requestStr.size()) bodyPart = requestStr.substr(bodyStart);
+    }
 
-    // 解析请求行（第一行）
+    std::istringstream iss(headerPart);
+    std::string line;
     if (std::getline(iss, line)) {
         std::istringstream lineStream(line);
-        // 提取方法和路径
         lineStream >> request.method >> request.path;
-
-        // 分离路径和查询参数
         size_t queryPos = request.path.find('?');
         if (queryPos != std::string::npos) {
-            std::string query = request.path.substr(queryPos + 1);
-            request.queryParams = parseQueryParams(query);
-            // 解析查询参数
+            request.queryParams = parseQueryParams(request.path.substr(queryPos + 1));
             request.path = request.path.substr(0, queryPos);
         }
-        // 更新路径为不包含查询参数的部分
     }
-
-    // 解析头部和body
-    bool inBody = false;
-    std::string body;
-    while (std::getline(iss, line)) {  // 标记是否进入body部分
-        if (line.empty() || line == "\r") {
-            inBody = true;
-        // 空行或\r表示头部结束，body开始
-            continue;
-        }
-
-        if (!inBody) {
-            size_t colonPos = line.find(':');
-            if (colonPos != std::string::npos) {
-            // 解析头部字段
-                std::string key = line.substr(0, colonPos);
-                std::string value = line.substr(colonPos + 1);
-                // 提取键值对
-
-                // 去除空格和\r
-                key.erase(0, key.find_first_not_of(" \t\r"));
-                key.erase(key.find_last_not_of(" \t\r") + 1);
-                value.erase(0, value.find_first_not_of(" \t\r"));
-                value.erase(value.find_last_not_of(" \t\r") + 1);
-
-                request.headers[key] = value;
-            }
-        } else {
-            body += line;
-            if (!iss.eof()) body += "\n";
+    while (std::getline(iss, line)) {
+        if (line.empty() || line == "\r") break;
+        size_t colonPos = line.find(':');
+        if (colonPos != std::string::npos) {
+            std::string key = line.substr(0, colonPos);
+            std::string value = line.substr(colonPos + 1);
+            key.erase(0, key.find_first_not_of(" \t\r"));
+            if (!key.empty()) key.erase(key.find_last_not_of(" \t\r") + 1);
+            value.erase(0, value.find_first_not_of(" \t\r"));
+            if (!value.empty()) value.erase(value.find_last_not_of(" \t\r") + 1);
+            request.headers[key] = value;
         }
     }
 
-    request.body = body;
+    size_t contentLength = 0;
+    for (const auto& p : request.headers) {
+        std::string k = p.first;
+        std::transform(k.begin(), k.end(), k.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (k == "content-length") {
+            try { contentLength = static_cast<size_t>(std::stoul(p.second)); } catch (...) {}
+            break;
+        }
+    }
+    if (contentLength > 0 && bodyPart.size() >= contentLength)
+        request.body = bodyPart.substr(0, contentLength);
+    else
+        request.body = bodyPart;
     request.parseBody();
-
-//    std::cout<<"request.body: "<<request.body.size()<<std::endl;
-
     return request;
 }
 
@@ -740,17 +734,14 @@ std::string Server::buildResponse(const Response& response) {
     oss << "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With\r\n";
     oss << "Access-Control-Max-Age: 86400\r\n";  // 预检请求缓存24小时
     
-    // 添加其他头部
     for (const auto& header : response.headers) {
         oss << header.first << ": " << header.second << "\r\n";
     }
-    
-    oss << "Content-Length: " << response.body.length() << "\r\n";
+    if (response.headers.find("Content-Length") == response.headers.end())
+        oss << "Content-Length: " << response.body.length() << "\r\n";
     oss << "\r\n";
-    oss << response.body;
-
-//    std::cout<<oss.str()<<std::endl;
-    
+    if (!response.streamWriter)
+        oss << response.body;
     return oss.str();
 }
 
