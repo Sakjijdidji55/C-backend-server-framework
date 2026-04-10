@@ -15,6 +15,7 @@
 //#include <hiredis/hiredis.h>
 #include "RDConnector.h"
 #include "Crash.h"
+#include "include/Coroutine.h"
 
 /**
  * @brief 程序主入口函数

@@ -739,6 +739,14 @@ struct Response {
  * @brief Route handler function type
  */
 typedef std::function<void(const Request&, Response&)> Handler;
+typedef std::function<bool(const Request&, Response&)> Middleware;
+
+struct RouteEntry {
+    Handler handler;
+    std::vector<Middleware> middlewares;
+};
+
+class RouterGroup;
 
 /**
  * @class Server
@@ -772,6 +780,7 @@ public:
      * @param handler Handler function
      */
     void get(const std::string& path, Handler handler);
+    void get(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
     
     /**
      * @brief 注册POST方法路由
@@ -782,6 +791,7 @@ public:
      * @param handler Handler function
      */
     void post(const std::string& path, Handler handler);
+    void post(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
     
     /**
      * @brief 注册PUT方法路由
@@ -792,6 +802,7 @@ public:
      * @param handler Handler function
      */
     void put(const std::string& path, Handler handler);
+    void put(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
     
     /**
      * @brief 注册DELETE方法路由
@@ -802,6 +813,10 @@ public:
      * @param handler Handler function
      */
     void del(const std::string& path, Handler handler);
+    void del(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
+
+    RouterGroup group(const std::string& prefix);
+    void use(Middleware middleware);
     
     /**
      * @brief 启动服务器
@@ -822,6 +837,9 @@ public:
      * @return Server* Server instance pointer
      */
     static Server* getInstance();
+
+    void addRoute(const std::string& method, const std::string& path, Handler handler, std::vector<Middleware> middlewares);
+
 private:
     int port_;                            ///< 服务器端口 (Server port)
     int serverSocket_;                    ///< 服务器套接字 (Server socket)
@@ -836,8 +854,9 @@ private:
      * @brief 路由表：method -> (path -> handler)
      * @brief Routes table: method -> (path -> handler)
      */
-    std::map<std::string, std::map<std::string, Handler>> routes_;
-    
+    std::map<std::string, std::map<std::string, RouteEntry>> routes_;
+    std::vector<Middleware> middlewares_;
+
     /**
      * @brief 静态成员用于信号处理
      * @brief Static member for signal handling
@@ -867,7 +886,7 @@ private:
     void handleClient(int clientSocket, const sockaddr_in *clientAddress);
     static Request parseRequest(const std::string& requestStr);
     static std::string buildResponse(const Response& response);
-    Handler findHandler(const std::string& method, const std::string& path);
+    const RouteEntry* findRoute(const std::string& method, const std::string& path) const;
     static std::map<std::string, std::string> parseQueryParams(const std::string& query);
     
     // 工具函数
@@ -885,6 +904,32 @@ private:
     void cleanup();
 
     void doTaskRegular(long long int during) const;
+};
+
+class RouterGroup {
+public:
+    RouterGroup(Server& app, std::string prefix, std::vector<Middleware> middlewares);
+
+    RouterGroup group(const std::string& prefix) const;
+    RouterGroup& use(Middleware middleware);
+
+    void get(const std::string& path, Handler handler);
+    void post(const std::string& path, Handler handler);
+    void put(const std::string& path, Handler handler);
+    void del(const std::string& path, Handler handler);
+
+    void get(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
+    void post(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
+    void put(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
+    void del(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler);
+
+private:
+    Server& app_;
+    std::string prefix_;
+    std::vector<Middleware> middlewares_;
+
+    std::string resolvePath(const std::string& path) const;
+    std::vector<Middleware> mergeMiddlewares(const std::vector<Middleware>& routeMiddlewares) const;
 };
 
 #endif // SERVER_H

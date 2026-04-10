@@ -19,6 +19,7 @@
 #include <csignal>
 #include <iomanip>
 #include <ctime>
+#include "../include/Coroutine.h"
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -157,23 +158,49 @@ Server::~Server() {
 }
 
 void Server::get(const std::string& path, Handler handler) {
-    std::lock_guard<std::mutex> lock(routesMutex_);
-    routes_["GET"][path] = std::move(handler);
+    addRoute("GET", path, std::move(handler), {});
 }
 
 void Server::post(const std::string& path, Handler handler) {
-    std::lock_guard<std::mutex> lock(routesMutex_);
-    routes_["POST"][path] = std::move(handler);
+    addRoute("POST", path, std::move(handler), {});
 }
 
 void Server::put(const std::string& path, Handler handler) {
-    std::lock_guard<std::mutex> lock(routesMutex_);
-    routes_["PUT"][path] = std::move(handler);
+    addRoute("PUT", path, std::move(handler), {});
 }
 
 void Server::del(const std::string& path, Handler handler) {
+    addRoute("DELETE", path, std::move(handler), {});
+}
+
+void Server::get(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("GET", path, std::move(handler), middlewares);
+}
+
+void Server::post(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("POST", path, std::move(handler), middlewares);
+}
+
+void Server::put(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("PUT", path, std::move(handler), middlewares);
+}
+
+void Server::del(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    addRoute("DELETE", path, std::move(handler), middlewares);
+}
+
+void Server::use(Middleware middleware) {
     std::lock_guard<std::mutex> lock(routesMutex_);
-    routes_["DELETE"][path] = std::move(handler);
+    middlewares_.push_back(std::move(middleware));
+}
+
+void Server::addRoute(const std::string& method, const std::string& path, Handler handler, std::vector<Middleware> middlewares) {
+    std::lock_guard<std::mutex> lock(routesMutex_);
+    routes_[method][path] = RouteEntry{ std::move(handler), std::move(middlewares) };
+}
+
+RouterGroup Server::group(const std::string& prefix) {
+    return RouterGroup(*this, prefix, {});
 }
 
 /**
@@ -320,6 +347,7 @@ void Server::run() {
     std::cout << "==========================================="<< std::endl;
 
     threadpool_.addTask(&Server::doTaskRegular, this, 1000 * 60 * 30);
+    threadpool_.addTask(&Scheduler::start, &Scheduler::instance());
 
     // 主循环接受IPv4连接
     while (running_) {
@@ -559,24 +587,84 @@ void Server::stop() {
  * @param clientSocket Client socket descriptor
  * @param clientAddress Client address structure pointer
  */
+// 分组接收相关常量：单次 recv 块大小、请求头最大长度、请求体最大长度（如大文件上传）
+namespace {
+    constexpr size_t RECV_CHUNK_SIZE   = 64 * 1024;       // 64KB 每块
+    constexpr size_t MAX_HEADER_SIZE  = 1 * 1024 * 1024; // 1MB 头上限
+    constexpr size_t MAX_BODY_SIZE    = 100 * 1024 * 1024; // 100MB body 上限，可按需调整
+}
+
+/**
+ * @brief 从原始 HTTP 头字符串中解析 Content-Length（用于分组接收时判断 body 长度）
+ * @param headerPart 请求头部分（到 \r\n\r\n 之前）
+ * @return Content-Length 字节数，未找到或无效则返回 0
+ */
+static size_t parseContentLengthFromHeaders(const std::string& headerPart) {
+    std::string h = headerPart;
+    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    size_t pos = h.find("content-length:");
+    if (pos == std::string::npos) return 0;
+    pos += 14;
+    while (pos < h.size() && (h[pos] == ' ' || h[pos] == '\t')) ++pos;
+    size_t start = pos;
+    while (pos < h.size() && h[pos] >= '0' && h[pos] <= '9') ++pos;
+    if (pos == start) return 0;
+    try {
+        return static_cast<size_t>(std::stoull(h.substr(start, pos - start)));
+    } catch (...) { return 0; }
+}
+
 void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
     std::time_t now = std::time(nullptr);
     long long timestamp = static_cast<long long>(now) * 1000;
 
-    // 创建缓冲区并初始化为0，用于接收客户端数据
-    char buffer[81920] = {0};
-    // 从客户端读取数据，读取的字节数存储在bytesRead中
-    int bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-    
-    // 如果读取字节数小于等于0，表示连接已关闭或出错
-    if (bytesRead <= 0) {
-        // 关闭客户端套接字并返回
+    std::string requestStr;
+    requestStr.reserve(RECV_CHUNK_SIZE * 2);
+    char buffer[RECV_CHUNK_SIZE];
+
+    // ========== 阶段一：循环接收直到收满完整 HTTP 头（\r\n\r\n 或 \n\n）==========
+    size_t headerEndPos = 0;
+    while (true) {
+        int n = recv(clientSocket, buffer, sizeof(buffer), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+        size_t he = requestStr.find("\r\n\r\n");
+        if (he == std::string::npos) he = requestStr.find("\n\n");
+        if (he != std::string::npos) {
+            headerEndPos = he + (requestStr.compare(he, 4, "\r\n\r\n") == 0 ? 4u : 2u);
+            break;
+        }
+        if (requestStr.size() > MAX_HEADER_SIZE) {
+            close(clientSocket);
+            return;
+        }
+    }
+
+    // 从已接收的头中解析 Content-Length，确定还需接收的 body 长度
+    std::string headerPart = requestStr.substr(0, headerEndPos);
+    size_t contentLength = parseContentLengthFromHeaders(headerPart);
+
+    if (contentLength > MAX_BODY_SIZE) {
         close(clientSocket);
         return;
     }
-    
-    // 将接收到的数据转换为字符串
-    std::string requestStr(buffer, bytesRead);
+
+    // ========== 阶段二：若存在 body，按块继续接收直到收满 Content-Length 字节 ==========
+    size_t totalNeeded = headerEndPos + contentLength;
+    while (requestStr.size() < totalNeeded) {
+        size_t toRead = std::min(static_cast<size_t>(sizeof(buffer)), totalNeeded - requestStr.size());
+        int n = recv(clientSocket, buffer, static_cast<int>(toRead), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+    }
+
+//    std::cout<<requestStr.substr(0, std::min(requestStr.size(), size_t(4096)))<<std::endl;
 
     Log::getInstance()->write(getFormattedDate()+" "+getClientIP(clientAddress));
 
@@ -592,24 +680,52 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
         response.body = "";
         // CORS 头将在 buildResponse 中添加
     } else {
+        bool allowed = true;
+        {
+            std::lock_guard<std::mutex> lock(routesMutex_);
+            for (const auto& middleware : middlewares_) {
+                if (!middleware)
+                    continue;
+                if (!middleware(request, response)) {
+                    allowed = false;
+                    break;
+                }
+            }
+        }
+        if (!allowed)
+            goto SEND_RESPONSE;
+
         // 查找路由处理器
-        Handler handler = findHandler(request.method, request.path);
-        if (handler) {
+        const RouteEntry* route = findRoute(request.method, request.path);
+        if (route && route->handler) {
+//            std::cout<<"fi"<<std::endl;
             // 如果找到处理器，执行处理函数
             try {
-                handler(request, response);
+                // route-level middlewares
+                for (const auto& middleware : route->middlewares) {
+                    if (!middleware)
+                        continue;
+                    if (!middleware(request, response)) {
+                        allowed = false;
+                        break;
+                    }
+                }
+                if (allowed)
+                    route->handler(request, response);
             } catch (const std::exception& e) {
                 // 捕获异常并返回500错误
                 response.statusCode = 500;
                 response.error(500,"error: " + std::string(e.what()));
             }
         } else {
+//            std::cout<<"1"<<std::endl;
             // 如果未找到处理器，返回404错误
             response.statusCode = 404;
             response.error(404, "Resource not found");
         }
     }
-    
+
+SEND_RESPONSE:
     std::string responseStr = buildResponse(response);
 #ifdef _WIN32
     send(clientSocket, responseStr.c_str(), static_cast<int>(responseStr.length()), 0);
@@ -642,6 +758,8 @@ void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
 
     close(clientSocket);
 }
+
+
 
 /**
  * 解析HTTP请求字符串，将其解析为Request结构体
@@ -751,18 +869,90 @@ std::string Server::buildResponse(const Response& response) {
  * @param path 请求的URL路径
  * @return 匹配的Handler对象，如果未找到则返回nullptr
  */
-Handler Server::findHandler(const std::string& method, const std::string& path) {
-    // 检查是否存在对应方法的路由映射
-    if (routes_.find(method) != routes_.end()) {
-        const auto& methodRoutes = routes_[method];  // 获取该方法的所有路由
-        
-        // 精确匹配检查
-        if (methodRoutes.find(path) != methodRoutes.end()) {
-            return methodRoutes.at(path);  // 返回精确匹配的处理程序
-        }
+const RouteEntry* Server::findRoute(const std::string& method, const std::string& path) const {
+    const auto mit = routes_.find(method);
+    if (mit == routes_.end())
+        return nullptr;
+//    std::cout<<path<<std::endl;
+    const auto& methodRoutes = mit->second;
+    const auto rit = methodRoutes.find(path);
+//    for (const auto& [p,i]: methodRoutes) {
+//        std::cout<<p<<std::endl;
+//    }
+    if (rit == methodRoutes.end())
+        return nullptr;
+//    std::cout<<path<<std::endl;
+    return &rit->second;
+}
+
+RouterGroup::RouterGroup(Server& app, std::string prefix, std::vector<Middleware> middlewares)
+    : app_(app), prefix_(std::move(prefix)), middlewares_(std::move(middlewares)) {}
+
+RouterGroup RouterGroup::group(const std::string& prefix) const {
+    std::string nextPrefix = prefix_;
+    if (!prefix.empty()) {
+        if (!nextPrefix.empty() && nextPrefix.back() == '/' && prefix.front() == '/')
+            nextPrefix.pop_back();
+        nextPrefix += prefix;
     }
-    
-    return nullptr;  // 未找到匹配的处理程序，返回空指针
+    return RouterGroup(app_, std::move(nextPrefix), middlewares_);
+}
+
+RouterGroup& RouterGroup::use(Middleware middleware) {
+    middlewares_.push_back(std::move(middleware));
+    return *this;
+}
+
+std::string RouterGroup::resolvePath(const std::string& path) const {
+    if (prefix_.empty())
+        return path;
+    if (path.empty())
+        return prefix_;
+    if (prefix_.back() == '/' && path.front() == '/')
+        return prefix_.substr(0, prefix_.size() - 1) + path;
+    if (prefix_.back() != '/' && path.front() != '/')
+        return prefix_ + "/" + path;
+    return prefix_ + path;
+}
+
+std::vector<Middleware> RouterGroup::mergeMiddlewares(const std::vector<Middleware>& routeMiddlewares) const {
+    std::vector<Middleware> merged;
+    merged.reserve(middlewares_.size() + routeMiddlewares.size());
+    merged.insert(merged.end(), middlewares_.begin(), middlewares_.end());
+    merged.insert(merged.end(), routeMiddlewares.begin(), routeMiddlewares.end());
+    return merged;
+}
+
+void RouterGroup::get(const std::string& path, Handler handler) {
+    app_.addRoute("GET", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::post(const std::string& path, Handler handler) {
+    app_.addRoute("POST", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::put(const std::string& path, Handler handler) {
+    app_.addRoute("PUT", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::del(const std::string& path, Handler handler) {
+    app_.addRoute("DELETE", resolvePath(path), std::move(handler), mergeMiddlewares({}));
+}
+
+void RouterGroup::get(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("GET", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
+}
+
+void RouterGroup::post(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("POST", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
+}
+
+void RouterGroup::put(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("PUT", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
+}
+
+void RouterGroup::del(const std::string& path, const std::vector<Middleware>& middlewares, Handler handler) {
+    app_.addRoute("DELETE", resolvePath(path), std::move(handler), mergeMiddlewares(middlewares));
 }
 
 #include <string>

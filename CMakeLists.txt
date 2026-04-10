@@ -128,7 +128,15 @@ if(UNIX)
             ${ZLIB_INCLUDE_DIR}
     )
 endif()
+# 针对 GCC/MinGW，屏蔽 deprecated 警告
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(CBSF PRIVATE -Wno-deprecated-declarations)
+endif()
 
+# 针对 Clang
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(CBSF PRIVATE -Wno-deprecated-declarations)
+endif()
 # 编译选项（核心修正：添加MinGW静态链接标准库，解决单独运行exe依赖问题）
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE
@@ -195,6 +203,7 @@ if(WIN32)
             uuid
             comdlg32
             advapi32
+            winhttp
     )
 else()
     # Linux：补充Redis库 + 保留原有依赖

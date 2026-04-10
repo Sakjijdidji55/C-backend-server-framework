@@ -15,4 +15,11 @@
 
 #include "Server.h"
 
+namespace RouteHandlers {
+void homeGet(const Request& req, Response& res);
+void homePost(const Request& req, Response& res);
+void downloadFile(const Request& req, Response& res);
+void downloadFileStream(const Request& req, Response& res);
+}
+
 #endif //CBSF_HEADLER_H

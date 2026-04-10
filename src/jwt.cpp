@@ -275,6 +275,7 @@ std::string JWT::generateToken(const std::map<std::string, std::string>& customC
  * @return Returns true if the token is valid, false otherwise
  */
 bool JWT::verifyToken(const std::string& token, std::string* payloadJson) const {
+//    std::cout<<token<<std::endl;
     // 检查密钥是否为空
     // Check if secret key is empty
     if (secret_.empty()) {
@@ -1008,7 +1009,8 @@ std::string JWT::bytes_to_hex(const std::string & bytes) {
 
 JWT *JWT::getInstance() {
     if (instance_== nullptr) {
-        std::cerr<<"JWT instance is not initialized"<<std::endl;
+//        std::cerr<<"JWT instance is not initialized"<<std::endl;
+        instance_ = new JWT();
     }
     return instance_;
 }

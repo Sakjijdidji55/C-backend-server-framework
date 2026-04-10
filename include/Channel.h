@@ -24,7 +24,11 @@ public:
         std::unique_lock<std::mutex> lock(mtx);
 
         // 等待条件：队列不满 或 通道关闭
-        cv.wait(lock, [this] { return queue.size() < buffer_size || closed; });
+        cv.wait(lock, [this] {
+            if (closed) return true;
+            if (buffer_size == 0) return queue.empty();
+            return queue.size() < buffer_size;
+        });
 
         // 通道已关闭，拒绝写入
         if (closed) {

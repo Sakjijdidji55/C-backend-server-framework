@@ -46,6 +46,10 @@ public:
         HS256  ///< HMAC-SHA256算法 (HMAC-SHA256 algorithm)
     };
 
+    [[nodiscard]] std::string getSecret() const {
+        return secret_;
+    }
+
     /**
      * @brief 构造函数，设置过期时间和密钥路径
      * @brief Constructor, set expiration time and key path

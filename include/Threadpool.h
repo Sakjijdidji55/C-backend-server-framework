@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <functional>
 #include <atomic>
+#include <utility>
 
 /**
  * @class ThreadPool
@@ -103,10 +104,17 @@ public:
         }
         // 将任务添加到队列中
         // Add task to the queue
-        tasks_.emplace(std::bind(
-                std::forward<F>(f),
-                std::forward<Args>(args)...
-        ));
+        // NOTICE: 无额外参数时不要使用 std::bind 包装 lambda，否则 MSVC 等对
+        // std::bind(lambda) -> std::function<void()> 的推导/存储可能失败。
+        if constexpr (sizeof...(Args) == 0) {
+            tasks_.emplace(std::forward<F>(f));
+        }
+        else {
+            tasks_.emplace(std::bind(
+                    std::forward<F>(f),
+                    std::forward<Args>(args)...
+            ));
+        }
         lock.unlock();
         // 通知一个等待的线程有新任务可用
         // Notify one waiting thread that a new task is available

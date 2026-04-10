@@ -2,8 +2,8 @@
 // Created by HP on 2025/12/16.
 //
 
-#ifndef CBSF_CONFIG_H
-#define CBSF_CONFIG_H
+#ifndef CBSF_YAML_PARSER_H
+#define CBSF_YAML_PARSER_H
 
 #include <iostream>
 #include <fstream>
@@ -309,7 +309,7 @@ public:
      * @param path 路径，如 "database.mysql.hosts[0]"
      * @return 节点指针，不存在返回nullptr
      */
-    std::shared_ptr<YamlNode> getNode(const std::string& path) const {
+    [[nodiscard]] std::shared_ptr<YamlNode> getNode(const std::string& path) const {
         if (!rootNode_) return nullptr;
 
         std::shared_ptr<YamlNode> current = rootNode_;
@@ -488,6 +488,20 @@ private:
 
     // 解析节点
     std::shared_ptr<YamlNode> parseNode(const std::vector<std::string>& lines, size_t& pos, int indent) {
+        // 跳过空行与注释行（否则 jwt: 下首行为 # 时会被当成标量，且 pos 不前进导致结构错误）
+        while (pos < lines.size()) {
+            std::string raw = lines[pos];
+            int currentIndent = getIndentLevel(raw);
+            if (currentIndent < indent) {
+                return nullptr; // 返回上层
+            }
+            std::string t = trim(raw);
+            if (t.empty() || t[0] == '#') {
+                pos++;
+                continue;
+            }
+            break;
+        }
         if (pos >= lines.size()) {
             return nullptr;
         }
@@ -710,4 +724,4 @@ private:
     std::string configPath_;
     std::shared_ptr<YamlNode> rootNode_;
 };
-#endif //CBSF_CONFIG_H
+#endif // CBSF_YAML_PARSER_H
