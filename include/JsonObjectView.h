@@ -30,11 +30,11 @@ public:
 
     JsonObjectView operator[](const std::string& key) const {
         if (node_.getType() != JsonValue::OBJECT)
-            return JsonObjectView();
+            return {};
         const auto obj = node_.asObject();
         const auto it = obj.find(key);
         if (it == obj.end())
-            return JsonObjectView();
+            return {};
         return JsonObjectView(it->second);
     }
 

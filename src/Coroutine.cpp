@@ -14,14 +14,15 @@ void Coroutine::entry(intptr_t arg) {
     Coroutine* coro = reinterpret_cast<Coroutine*>(arg);
     if (coro->func_) coro->func_();
     coro->state_ = CoroutineState::DONE;
-    yield();   // 返回调度器
+    coro->suspend();   // 返回调度器
 }
 #elif defined(CBSF_USE_FIBER)
 void WINAPI Coroutine::fiberEntry(LPVOID lpParameter) {
     Coroutine* coro = static_cast<Coroutine*>(lpParameter);
     if (coro->func_) coro->func_();
     coro->state_ = CoroutineState::DONE;
-    yield();
+//    yield();   // 返回调度器
+    coro->suspend();
 }
 #endif
 
@@ -135,7 +136,7 @@ void Scheduler::start() {
     tls_current_scheduler = nullptr;
 }
 
-void Scheduler::run_on_worker_thread() {
+[[noreturn]] void Scheduler::run_on_worker_thread() {
     tls_current_scheduler = this;
 
 #ifdef CBSF_USE_FIBER
@@ -147,18 +148,21 @@ void Scheduler::run_on_worker_thread() {
     while (true) {
         std::vector<std::shared_ptr<Coroutine>> run_list;
         {
-            std::lock_guard<std::mutex> lock(mtx_);
-            if (!coros_.empty())
-                run_list.swap(coros_);
+            std::unique_lock<std::mutex> lock(mtx_);
+            // 等待直到有新任务
+            cv_.wait(lock, [this]() {
+                return !coros_.empty();
+            });
+            // 取出所有任务
+            run_list.swap(coros_);
         }
-        if (run_list.empty()) {
-            std::this_thread::yield();
-            continue;
-        }
+
+        // 执行所有协程
         for (auto& coro : run_list) {
             if (coro->state() == CoroutineState::READY ||
                 coro->state() == CoroutineState::SUSPEND) {
                 coro->resume();
+                // 未完成的放回队列
                 if (coro->state() != CoroutineState::DONE) {
                     std::lock_guard<std::mutex> lock(mtx_);
                     coros_.push_back(coro);

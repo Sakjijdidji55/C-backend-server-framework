@@ -24,6 +24,7 @@
 #include <winsock2.h>    // Windows平台网络头文件 (Windows platform network header)
 #include <windows.h>
 #include <fstream>
+#include <ws2ipdef.h>
 
 #else
 #include <sys/socket.h>  // Linux/Unix平台网络头文件 (Linux/Unix platform network header)
@@ -904,6 +905,10 @@ private:
     void cleanup();
 
     void doTaskRegular(long long int during) const;
+
+    void handleClientIPv6(int clientSocket, const sockaddr_in6 *clientAddress);
+
+    static std::string getClientIPv6(const sockaddr_in6 *addr);
 };
 
 class RouterGroup {
@@ -928,8 +933,8 @@ private:
     std::string prefix_;
     std::vector<Middleware> middlewares_;
 
-    std::string resolvePath(const std::string& path) const;
-    std::vector<Middleware> mergeMiddlewares(const std::vector<Middleware>& routeMiddlewares) const;
+    [[nodiscard]] std::string resolvePath(const std::string& path) const;
+    [[nodiscard]] std::vector<Middleware> mergeMiddlewares(const std::vector<Middleware>& routeMiddlewares) const;
 };
 
 #endif // SERVER_H

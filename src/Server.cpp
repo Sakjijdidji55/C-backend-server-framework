@@ -203,6 +203,10 @@ RouterGroup Server::group(const std::string& prefix) {
     return RouterGroup(*this, prefix, {});
 }
 
+void test(u_long i) {
+    std::cout << "test " << i << std::endl;
+}
+
 /**
  * @brief 服务器运行函数
  * @brief Server run function
@@ -313,25 +317,25 @@ void Server::run() {
         return;
     }
 
-    // 如果IPv6 socket创建并绑定成功，开始监听
-    if (serverSocketIPv6 >= 0) {
-        if (listen(serverSocketIPv6, 10) < 0) {
-            std::cerr << "Warning: Failed to listen on IPv6 socket: "
-                      << strerror(errno) << std::endl;
-#ifdef _WIN32
-            closesocket(serverSocketIPv6);
-#else
-            close(serverSocketIPv6);
-#endif
-            serverSocketIPv6 = -1;
-        } else {
-            std::cout << "IPv6 socket listening on [::]:" << port_ << std::endl;
-            // 启动独立线程监听IPv6连接
-            std::thread([this, serverSocketIPv6]() {
-                this->listenIPv6(serverSocketIPv6);
-            }).detach();
-        }
-    }
+//    // 如果IPv6 socket创建并绑定成功，开始监听
+//    if (serverSocketIPv6 >= 0) {
+//        if (listen(serverSocketIPv6, 10) < 0) {
+//            std::cerr << "Warning: Failed to listen on IPv6 socket: "
+//                      << strerror(errno) << std::endl;
+//#ifdef _WIN32
+//            closesocket(serverSocketIPv6);
+//#else
+//            close(serverSocketIPv6);
+//#endif
+//            serverSocketIPv6 = -1;
+//        } else {
+//            std::cout << "IPv6 socket listening on [::]:" << port_ << std::endl;
+//            // 启动独立线程监听IPv6连接
+//            std::thread([this, serverSocketIPv6]() {
+//                this->listenIPv6(serverSocketIPv6);
+//            }).detach();
+//        }
+//    }
 
     running_ = true;
 
@@ -347,16 +351,33 @@ void Server::run() {
     std::cout << "==========================================="<< std::endl;
 
     threadpool_.addTask(&Server::doTaskRegular, this, 1000 * 60 * 30);
-    threadpool_.addTask(&Scheduler::start, &Scheduler::instance());
+    threadpool_.addTask(&Scheduler::run_on_worker_thread, &Scheduler::instance());
+//    Scheduler::instance().submit([&]() {
+//       for (int i = 0; i < 10; i++) {
+//           std::cout << "Scheduler1::run_on_worker_thread" << std::endl;
+//           yield();
+//       }
+//    });
+//
+//    Scheduler::instance().submit([&]() {
+//        for (int i = 0; i < 10; i++) {
+//            std::cout << "Scheduler2::run_on_worker_thread" << std::endl;
+//            yield();
+//        }
+//    });
 
     // 主循环接受IPv4连接
     while (running_) {
+//        std::cout<<1<<std::endl;
         struct sockaddr_in clientAddress{};
         socklen_t clientAddrLen = sizeof(clientAddress);
 
         int clientSocket = accept(serverSocket_,
                                   (struct sockaddr*)&clientAddress,
                                   &clientAddrLen);
+
+//        std::cout<<2<<std::endl;
+
         if (clientSocket < 0) {
             if (running_) {
                 std::cerr << "Error: Failed to accept IPv4 connection: "
@@ -364,6 +385,8 @@ void Server::run() {
             }
             continue;
         }
+
+//        Scheduler::instance().submit(test, clientSocket);
 
         // 添加到线程池
         threadpool_.addTask(&Server::handleClient, this,
@@ -391,9 +414,9 @@ void Server::listenIPv6(int serverSocketIPv6) {
 
         // 根据地址族传递正确的参数
         if (clientAddr.ss_family == AF_INET6) {
-            threadpool_.addTask(&Server::handleClient, this,
+            threadpool_.addTask(&Server::handleClientIPv6, this,
                                 clientSocket,
-                                (struct sockaddr_in*)&clientAddr);
+                                (const sockaddr_in6*)&clientAddr);
         }
     }
 
@@ -613,8 +636,154 @@ static size_t parseContentLengthFromHeaders(const std::string& headerPart) {
         return static_cast<size_t>(std::stoull(h.substr(start, pos - start)));
     } catch (...) { return 0; }
 }
+// ==================== 【新增】专门处理 IPv6 客户端 ====================
+void Server::handleClientIPv6(int clientSocket, const sockaddr_in6 *clientAddress) {
+    std::time_t now = std::time(nullptr);
+    long long timestamp = static_cast<long long>(now) * 1000;
+
+    std::string requestStr;
+    requestStr.reserve(RECV_CHUNK_SIZE * 2);
+    char buffer[RECV_CHUNK_SIZE];
+
+    // ========== 阶段一：循环接收直到收满完整 HTTP 头（\r\n\r\n 或 \n\n）==========
+    size_t headerEndPos = 0;
+    while (true) {
+        int n = recv(clientSocket, buffer, sizeof(buffer), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+        size_t he = requestStr.find("\r\n\r\n");
+        if (he == std::string::npos) he = requestStr.find("\n\n");
+        if (he != std::string::npos) {
+            headerEndPos = he + (requestStr.compare(he, 4, "\r\n\r\n") == 0 ? 4u : 2u);
+            break;
+        }
+        if (requestStr.size() > MAX_HEADER_SIZE) {
+            close(clientSocket);
+            return;
+        }
+    }
+
+    // 从已接收的头中解析 Content-Length，确定还需接收的 body 长度
+    std::string headerPart = requestStr.substr(0, headerEndPos);
+    size_t contentLength = parseContentLengthFromHeaders(headerPart);
+
+    if (contentLength > MAX_BODY_SIZE) {
+        close(clientSocket);
+        return;
+    }
+
+    // ========== 阶段二：若存在 body，按块继续接收直到收满 Content-Length 字节 ==========
+    size_t totalNeeded = headerEndPos + contentLength;
+    while (requestStr.size() < totalNeeded) {
+        size_t toRead = std::min(static_cast<size_t>(sizeof(buffer)), totalNeeded - requestStr.size());
+        int n = recv(clientSocket, buffer, static_cast<int>(toRead), 0);
+        if (n <= 0) {
+            close(clientSocket);
+            return;
+        }
+        requestStr.append(buffer, static_cast<size_t>(n));
+    }
+
+    // 【修改】这里调用 IPv6 的获取IP函数
+    Log::getInstance()->write(getFormattedDate() + " " + getClientIPv6(clientAddress));
+
+    // 解析HTTP请求
+    Request request = parseRequest(requestStr);
+
+    // 创建响应对象
+    Response response;
+
+    // 处理 OPTIONS 预检请求（CORS）
+    if (request.method == "OPTIONS") {
+        response.statusCode = 200;
+        response.body = "";
+    } else {
+        bool allowed = true;
+        {
+            std::lock_guard<std::mutex> lock(routesMutex_);
+            for (const auto& middleware : middlewares_) {
+                if (!middleware) continue;
+                if (!middleware(request, response)) {
+                    allowed = false;
+                    break;
+                }
+            }
+        }
+        if (!allowed) goto SEND_RESPONSE;
+
+        // 查找路由处理器
+        const RouteEntry* route = findRoute(request.method, request.path);
+        if (route && route->handler) {
+            try {
+                for (const auto& middleware : route->middlewares) {
+                    if (!middleware) continue;
+                    if (!middleware(request, response)) {
+                        allowed = false;
+                        break;
+                    }
+                }
+                if (allowed) route->handler(request, response);
+            } catch (const std::exception& e) {
+                response.statusCode = 500;
+                response.error(500,"error: " + std::string(e.what()));
+            }
+        } else {
+            response.statusCode = 404;
+            response.error(404, "Resource not found");
+        }
+    }
+
+    SEND_RESPONSE:
+    std::string responseStr = buildResponse(response);
+#ifdef _WIN32
+    send(clientSocket, responseStr.c_str(), static_cast<int>(responseStr.length()), 0);
+#else
+    send(clientSocket, responseStr.c_str(), responseStr.length(), 0);
+#endif
+    if (response.streamWriter)
+        response.streamWriter(clientSocket);
+
+    // 【修改】这里调用 IPv6 的获取IP函数
+    std::string clientIP = getClientIPv6(clientAddress);
+    std::lock_guard<std::mutex> lock(logMutex_);
+    std::cout << clientIP << " - - [" << getFormattedDate() << "] \""
+              << request.method << " " << request.path;
+    if (!request.queryParams.empty()&&LogParams) {
+        std::cout << "?";
+        bool first = true;
+        for (const auto& param : request.queryParams) {
+            if (!first) std::cout << "&";
+            std::cout << param.first << "=" << param.second;
+            first = false;
+        }
+    }
+    std::cout << " HTTP/1.1\" Code: " << response.statusCode << " BodyLen: "
+              << response.body.length() << " CostTime: ";
+
+    std::time_t end_time = std::time(nullptr);
+    long long end_timestamp = static_cast<long long>(end_time) * 1000;
+    std::cout << end_timestamp - timestamp << "ms" << std::endl;
+
+    close(clientSocket);
+}
+
+// 专门获取 IPv6 地址
+std::string Server::getClientIPv6(const sockaddr_in6 *addr) {
+    char ipStr[INET6_ADDRSTRLEN];
+    inet_ntop(AF_INET6, &addr->sin6_addr, ipStr, sizeof(ipStr));
+    return std::string(ipStr);
+}
 
 void Server::handleClient(int clientSocket, const sockaddr_in *clientAddress) {
+//    std::cout<<1<<std::endl;
+//    std::cout<<3<<std::endl;
+
+//    Scheduler::instance().submit([=]() {
+//       std::cout<<1<<std::endl;
+//    });
     std::time_t now = std::time(nullptr);
     long long timestamp = static_cast<long long>(now) * 1000;
 
@@ -1154,4 +1323,8 @@ void Server::doTaskRegular(long long during) const {
     }
 
     std::cout << "Regular task loop stopped" << std::endl;
+}
+
+BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
+    return 0;
 }
