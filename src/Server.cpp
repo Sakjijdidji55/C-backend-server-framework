@@ -1301,7 +1301,7 @@ void Server::doTaskRegular(long long during) const {
             try {
                 task(); // 捕获任务异常，避免主线程崩溃
                 last_exec_time = now; // 更新执行时间（基于当前时间，而非累加，避免漂移）
-            } catch (const std::exception& e) {
+            } catch (const std::exception &e) {
                 std::cerr << "Task execute failed: " << e.what() << std::endl;
                 last_exec_time = now; // 即使任务失败，仍更新时间（避免频繁重试）
             } catch (...) {
@@ -1323,8 +1323,4 @@ void Server::doTaskRegular(long long during) const {
     }
 
     std::cout << "Regular task loop stopped" << std::endl;
-}
-
-BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
-    return 0;
 }

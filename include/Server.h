@@ -915,7 +915,7 @@ class RouterGroup {
 public:
     RouterGroup(Server& app, std::string prefix, std::vector<Middleware> middlewares);
 
-    RouterGroup group(const std::string& prefix) const;
+    [[nodiscard]] RouterGroup group(const std::string& prefix) const;
     RouterGroup& use(Middleware middleware);
 
     void get(const std::string& path, Handler handler);

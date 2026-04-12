@@ -1,27 +1,25 @@
-//
-// Created by HP on 2026/4/9.
-//
-
 #include "Coroutine.h"
 
-// ==================== Coroutine 实现 ====================
 constexpr size_t kDefaultStackSize = 128 * 1024;
-thread_local Coroutine* tls_current_coro;
+thread_local Coroutine* tls_current_coro = nullptr;
 thread_local Scheduler* tls_current_scheduler = nullptr;
 
 #ifdef CBSF_USE_UCONTEXT
 void Coroutine::entry(intptr_t arg) {
     Coroutine* coro = reinterpret_cast<Coroutine*>(arg);
-    if (coro->func_) coro->func_();
+    if (coro->func_) {
+        coro->func_();
+    }
     coro->state_ = CoroutineState::DONE;
-    coro->suspend();   // 返回调度器
+    coro->suspend();
 }
 #elif defined(CBSF_USE_FIBER)
 void WINAPI Coroutine::fiberEntry(LPVOID lpParameter) {
     Coroutine* coro = static_cast<Coroutine*>(lpParameter);
-    if (coro->func_) coro->func_();
+    if (coro->func_) {
+        coro->func_();
+    }
     coro->state_ = CoroutineState::DONE;
-//    yield();   // 返回调度器
     coro->suspend();
 }
 #endif
@@ -55,8 +53,8 @@ Coroutine::Coroutine(Coroutine&& other) noexcept
           state_(other.state_)
 #ifdef CBSF_USE_UCONTEXT
         , ctx_(other.ctx_),
-      stack_(std::move(other.stack_)),
-      stack_size_(other.stack_size_)
+          stack_(std::move(other.stack_)),
+          stack_size_(other.stack_size_)
 #elif defined(CBSF_USE_FIBER)
         , fiber_(other.fiber_)
 #endif
@@ -67,7 +65,6 @@ Coroutine::Coroutine(Coroutine&& other) noexcept
 #endif
 }
 
-// resume 和 suspend 需要访问 Scheduler 的成员，所以定义在 Scheduler 之后
 void Coroutine::resume() {
     if (state_ == CoroutineState::DONE) return;
     Scheduler* sched = tls_current_scheduler;
@@ -81,18 +78,15 @@ void Coroutine::resume() {
 #elif defined(CBSF_USE_FIBER)
     SwitchToFiber(fiber_);
 #endif
-
-    if (state_ == CoroutineState::DONE) {
-        // 协程已结束，资源稍后释放
-    }
 }
 
 void Coroutine::suspend() {
-    if (state_ != CoroutineState::RUNNING) return;
-    state_ = CoroutineState::SUSPEND;
-
     Scheduler* sched = tls_current_scheduler;
     if (!sched) return;
+
+    if (state_ == CoroutineState::RUNNING) {
+        state_ = CoroutineState::SUSPEND;
+    }
 
 #ifdef CBSF_USE_UCONTEXT
     swapcontext(&ctx_, &sched->main_ctx_);
@@ -101,7 +95,7 @@ void Coroutine::suspend() {
 #endif
 }
 
-// ==================== Scheduler 实现 ====================
+// ==================== Scheduler ====================
 void Scheduler::start() {
     tls_current_scheduler = this;
 
@@ -119,8 +113,7 @@ void Scheduler::start() {
             run_list.swap(coros_);
         }
         for (auto& coro : run_list) {
-            if (coro->state() == CoroutineState::READY ||
-                coro->state() == CoroutineState::SUSPEND) {
+            if (coro->state() == CoroutineState::READY || coro->state() == CoroutineState::SUSPEND) {
                 coro->resume();
                 if (coro->state() != CoroutineState::DONE) {
                     std::lock_guard<std::mutex> lock(mtx_);
@@ -148,21 +141,19 @@ void Scheduler::start() {
     while (true) {
         std::vector<std::shared_ptr<Coroutine>> run_list;
         {
-            std::unique_lock<std::mutex> lock(mtx_);
-            // 等待直到有新任务
-            cv_.wait(lock, [this]() {
-                return !coros_.empty();
-            });
-            // 取出所有任务
-            run_list.swap(coros_);
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (!coros_.empty())
+                run_list.swap(coros_);
         }
 
-        // 执行所有协程
+        if (run_list.empty()) {
+            std::this_thread::yield();
+            continue;
+        }
+
         for (auto& coro : run_list) {
-            if (coro->state() == CoroutineState::READY ||
-                coro->state() == CoroutineState::SUSPEND) {
+            if (coro->state() == CoroutineState::READY || coro->state() == CoroutineState::SUSPEND) {
                 coro->resume();
-                // 未完成的放回队列
                 if (coro->state() != CoroutineState::DONE) {
                     std::lock_guard<std::mutex> lock(mtx_);
                     coros_.push_back(coro);
@@ -176,4 +167,3 @@ void Scheduler::start() {
 #endif
     tls_current_scheduler = nullptr;
 }
-
