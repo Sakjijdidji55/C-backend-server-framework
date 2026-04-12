@@ -2,8 +2,8 @@
 // Created by HP on 2026/4/3.
 //
 
-#include "../include/Config.h"
-#include "../include/YamlParser.h"
+#include "YamlParser.h"
+#include "Config.h"
 
 #include <iostream>
 #include <utility>
